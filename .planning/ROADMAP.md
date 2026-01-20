@@ -1,0 +1,101 @@
+# Roadmap: NANO
+
+## Overview
+
+NANO is built in five phases that follow the natural dependency chain: first make V8 run JavaScript from Zig, then expose Workers-compatible APIs, then add HTTP routing for multi-app hosting, then optimize cold starts with snapshots and pooling, and finally harden for production with resource limits and observability. Each phase delivers a verifiable capability that the next phase builds upon.
+
+## Phases
+
+**Phase Numbering:**
+- Integer phases (1, 2, 3): Planned milestone work
+- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
+
+Decimal phases appear between their surrounding integers in numeric order.
+
+- [ ] **Phase 1: V8 Foundation** - Zig can execute JavaScript and manage memory
+- [ ] **Phase 2: API Surface** - Workers-compatible APIs (fetch, crypto, console)
+- [ ] **Phase 3: Multi-App Hosting** - HTTP server routes requests to apps
+- [ ] **Phase 4: Snapshots + Pooling** - Sub-5ms cold starts via V8 snapshots
+- [ ] **Phase 5: Production Hardening** - Resource limits and observability
+
+## Phase Details
+
+### Phase 1: V8 Foundation
+**Goal**: Zig can execute JavaScript code via V8 with per-request memory management
+**Depends on**: Nothing (first phase)
+**Requirements**: CORE-01, CORE-02
+**Success Criteria** (what must be TRUE):
+  1. Running `nano eval "1 + 1"` returns `2` to stdout
+  2. JavaScript syntax errors return meaningful error messages
+  3. Memory allocated during script execution is freed when request ends
+**Plans**: TBD
+
+Plans:
+- [ ] 01-01: TBD
+
+### Phase 2: API Surface
+**Goal**: Scripts have access to Workers-compatible APIs (fetch, crypto, console, streams)
+**Depends on**: Phase 1
+**Requirements**: WAPI-01, WAPI-02, WAPI-03, WAPI-04, WAPI-05, WAPI-06, HTTP-01, HTTP-02, HTTP-03, HTTP-04, HTTP-05, HTTP-06, HTTP-07, CRYP-01, CRYP-02, CRYP-03, CRYP-04
+**Success Criteria** (what must be TRUE):
+  1. Script can fetch an external URL and read the response body
+  2. Script can compute SHA-256 hash via crypto.subtle.digest()
+  3. console.log output appears in host process logs
+  4. Script can encode/decode text, base64, and URL parameters
+**Plans**: TBD
+
+Plans:
+- [ ] 02-01: TBD
+
+### Phase 3: Multi-App Hosting
+**Goal**: Multiple apps run on the same NANO process, routed by port
+**Depends on**: Phase 2
+**Requirements**: HOST-01, HOST-02, HOST-03, OBSV-02
+**Success Criteria** (what must be TRUE):
+  1. Pointing NANO at a folder starts an app serving HTTP requests
+  2. Two apps on different ports run independently without interference
+  3. HTTP errors return proper status codes (4xx, 5xx) with clean messages
+**Plans**: TBD
+
+Plans:
+- [ ] 03-01: TBD
+
+### Phase 4: Snapshots + Pooling
+**Goal**: Cold starts under 5ms via V8 snapshots and warm isolate pooling
+**Depends on**: Phase 3
+**Requirements**: CORE-03, CORE-04
+**Success Criteria** (what must be TRUE):
+  1. p99 cold start latency is under 5ms (measured, not estimated)
+  2. Warm isolates are reused for subsequent requests to same app
+  3. Snapshot contains all Phase 2 APIs pre-initialized
+**Plans**: TBD
+
+Plans:
+- [ ] 04-01: TBD
+
+### Phase 5: Production Hardening
+**Goal**: NANO is safe to run in production with untrusted code
+**Depends on**: Phase 4
+**Requirements**: RLIM-01, RLIM-02, RLIM-03, OBSV-01, OBSV-03
+**Success Criteria** (what must be TRUE):
+  1. Infinite loops terminate after timeout (50ms default)
+  2. Memory-hungry scripts fail at limit (128MB default) without crashing host
+  3. Structured logs include app name, request ID, and timestamp
+  4. Prometheus endpoint exposes isolate count, memory usage, and latency metrics
+**Plans**: TBD
+
+Plans:
+- [ ] 05-01: TBD
+
+## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. V8 Foundation | 0/? | Not started | - |
+| 2. API Surface | 0/? | Not started | - |
+| 3. Multi-App Hosting | 0/? | Not started | - |
+| 4. Snapshots + Pooling | 0/? | Not started | - |
+| 5. Production Hardening | 0/? | Not started | - |
