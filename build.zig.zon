@@ -1,0 +1,16 @@
+.{
+    .name = .nano,
+    .version = "0.0.1",
+    .fingerprint = 0x95dbc4dbb5b51a48,
+    .dependencies = .{
+        .v8 = .{
+            .url = "https://github.com/lightpanda-io/zig-v8-fork/archive/refs/tags/v0.2.4.tar.gz",
+            .hash = "1220f4608f71afa1745e09f0f70377d05759d7414bcaea15ddeeba081fe9628a9b93",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
