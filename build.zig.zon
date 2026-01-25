@@ -7,6 +7,10 @@
             .url = "https://github.com/lightpanda-io/zig-v8-fork/archive/refs/tags/v0.2.4.tar.gz",
             .hash = "1220f4608f71afa1745e09f0f70377d05759d7414bcaea15ddeeba081fe9628a9b93",
         },
+        .libxev = .{
+            .url = "https://github.com/mitchellh/libxev/archive/refs/heads/main.tar.gz",
+            .hash = "libxev-0.0.0-86vtc0IbEwBzMSXa-ZPZ8JpcV4Mw1SrsTuvtJmFAQ7Uu",
+        },
     },
     .paths = .{
         "build.zig",
