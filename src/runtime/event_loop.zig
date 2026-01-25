@@ -75,14 +75,15 @@ pub const EventLoop = struct {
     }
 
     /// Cancel a timer by ID (marks as inactive)
-    pub fn cancelTimer(self: *EventLoop, timer_id: u32) bool {
+    /// Returns the callback_ptr for cleanup, or null if timer not found
+    pub fn cancelTimer(self: *EventLoop, timer_id: u32) ?usize {
         for (self.timers.items) |*timer| {
             if (timer.id == timer_id and timer.active) {
                 timer.active = false;
-                return true;
+                return timer.callback_ptr;
             }
         }
-        return false;
+        return null;
     }
 
     /// Run one iteration of the event loop (non-blocking)

@@ -140,8 +140,12 @@ fn clearTimer(raw_info: ?*const v8.C_FunctionCallbackInfo) void {
     // Get event loop
     const loop = global_event_loop orelse return;
 
-    // Cancel timer
-    _ = loop.cancelTimer(timer_id);
+    // Cancel timer and clean up persistent handle to prevent memory leak
+    if (loop.cancelTimer(timer_id)) |callback_ptr| {
+        const persistent_ptr: *v8.Persistent(v8.Function) = @ptrFromInt(callback_ptr);
+        persistent_ptr.deinit();
+        persistent_allocator.destroy(persistent_ptr);
+    }
 }
 
 /// Execute pending timer callbacks
