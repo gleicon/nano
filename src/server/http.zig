@@ -62,6 +62,11 @@ pub const HttpServer = struct {
             logError("Failed to load app", app_path, err);
             return err;
         };
+
+        // Set event loop reference on the app for async handler support
+        if (self.app) |*a| {
+            a.event_loop = &self.event_loop;
+        }
     }
 
     pub fn deinit(self: *HttpServer) void {

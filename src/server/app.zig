@@ -8,6 +8,7 @@ const fetch_api = @import("fetch");
 const headers = @import("headers");
 const request_api = @import("request");
 const timers = @import("timers");
+const EventLoop = @import("event_loop").EventLoop;
 
 // Get the array buffer allocator type
 const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
@@ -25,6 +26,8 @@ pub const App = struct {
     persistent_exports: v8.Persistent(v8.Value),
     persistent_fetch: v8.Persistent(v8.Value),
     initialized: bool,
+    // Event loop reference for async operations (set by server)
+    event_loop: ?*EventLoop = null,
 
     pub fn deinit(self: *App) void {
         // Clean up persistent handles first
@@ -256,7 +259,7 @@ pub fn handleRequest(
     // Call the cached fetch handler
     const fetch_fn = v8.Function{ .handle = @ptrCast(fetch_val.handle) };
     var fetch_args: [1]v8.Value = .{v8.Value{ .handle = @ptrCast(request_obj.handle) }};
-    const response = fetch_fn.call(context, exports, &fetch_args) orelse {
+    const handler_result = fetch_fn.call(context, exports, &fetch_args) orelse {
         if (try_catch.hasCaught()) {
             return errorResponse(isolate, &try_catch, context, allocator);
         }
@@ -266,6 +269,59 @@ pub fn handleRequest(
             .content_type = "text/plain",
         };
     };
+
+    // Handle Promise returns (async handlers)
+    var response = handler_result;
+    if (handler_result.isPromise()) {
+        const promise = v8.Promise{ .handle = @ptrCast(handler_result.handle) };
+
+        // Run microtasks to process Promise callbacks
+        isolate.performMicrotasksCheckpoint();
+
+        // Wait for Promise to resolve (with timeout to prevent infinite loops)
+        var iterations: u32 = 0;
+        const max_iterations: u32 = 10000; // Safety limit
+
+        while (promise.getState() == .kPending and iterations < max_iterations) {
+            // Run event loop tick if available
+            if (app.event_loop) |loop| {
+                _ = loop.tick() catch {};
+            }
+            // Run microtasks again
+            isolate.performMicrotasksCheckpoint();
+            iterations += 1;
+        }
+
+        if (promise.getState() == .kRejected) {
+            promise.markAsHandled();
+            const rejection = promise.getResult();
+            const rejection_str = rejection.toString(context) catch {
+                return .{
+                    .status = 500,
+                    .body = allocator.dupe(u8, "Promise rejected") catch "Error",
+                    .content_type = "text/plain",
+                };
+            };
+            var err_buf: [1024]u8 = undefined;
+            const err_len = rejection_str.writeUtf8(isolate, &err_buf);
+            return .{
+                .status = 500,
+                .body = allocator.dupe(u8, err_buf[0..err_len]) catch "Error",
+                .content_type = "text/plain",
+            };
+        }
+
+        if (promise.getState() == .kPending) {
+            return .{
+                .status = 500,
+                .body = allocator.dupe(u8, "Promise did not resolve in time") catch "Error",
+                .content_type = "text/plain",
+            };
+        }
+
+        // Get the resolved value
+        response = promise.getResult();
+    }
 
     // Extract Response data
     if (!response.isObject()) {

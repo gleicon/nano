@@ -156,6 +156,7 @@ pub fn build(b: *std.Build) void {
     app_module.addImport("headers", headers_module);
     app_module.addImport("request", request_module);
     app_module.addImport("timers", timers_module);
+    app_module.addImport("event_loop", event_loop_module);
 
     // Create server/metrics module
     const metrics_module = b.createModule(.{

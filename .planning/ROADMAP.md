@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [ ] **Phase 1: V8 Foundation** - Zig can execute JavaScript and manage memory
 - [ ] **Phase 2: API Surface** - Workers-compatible APIs (fetch, crypto, console)
-- [ ] **Phase 3: Multi-App Hosting** - HTTP server routes requests to apps
+- [x] **Phase 3: Multi-App Hosting** - HTTP server routes requests to apps
 - [ ] **Phase 4: Snapshots + Pooling** - Sub-5ms cold starts via V8 snapshots
 - [ ] **Phase 5: Production Hardening** - Resource limits and observability
 
@@ -31,12 +31,12 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 3 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Project setup and V8 integration via zig-v8-fork
-- [ ] 01-02-PLAN.md — Script execution with TryCatch error handling
-- [ ] 01-03-PLAN.md — CLI interface and arena allocator integration
+- [x] 01-01-PLAN.md — Project setup and V8 integration via zig-v8-fork
+- [x] 01-02-PLAN.md — Script execution with TryCatch error handling
+- [x] 01-03-PLAN.md — CLI interface and arena allocator integration
 
 ### Phase 2: API Surface
-**Goal**: Scripts have access to Workers-compatible APIs (fetch, crypto, console, streams)
+**Goal**: Scripts have access to Workers-compatible APIs (fetch, crypto, console, streams) + REPL for development
 **Depends on**: Phase 1
 **Requirements**: WAPI-01, WAPI-02, WAPI-03, WAPI-04, WAPI-05, WAPI-06, HTTP-01, HTTP-02, HTTP-03, HTTP-04, HTTP-05, HTTP-06, HTTP-07, CRYP-01, CRYP-02, CRYP-03, CRYP-04
 **Success Criteria** (what must be TRUE):
@@ -44,10 +44,15 @@ Plans:
   2. Script can compute SHA-256 hash via crypto.subtle.digest()
   3. console.log output appears in host process logs
   4. Script can encode/decode text, base64, and URL parameters
-**Plans**: TBD
+  5. `nano repl` starts interactive JavaScript session
+**Plans**: 5 plans
 
 Plans:
-- [ ] 02-01: TBD
+- [x] 02-01-PLAN.md — Console API (console.log/error/warn)
+- [x] 02-02-PLAN.md — Encoding APIs (TextEncoder/Decoder, atob/btoa)
+- [x] 02-03-PLAN.md — URL APIs (URL, URLSearchParams)
+- [x] 02-04-PLAN.md — REPL command with persistent isolate
+- [x] 02-05-PLAN.md — Crypto and Fetch APIs (stub, async requires Phase 3)
 
 ### Phase 3: Multi-App Hosting
 **Goal**: Multiple apps run on the same NANO process, routed by port
@@ -60,7 +65,11 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 03-01: TBD
+- [x] 03-01-PLAN.md — HTTP Server Foundation
+- [x] 03-02-PLAN.md — Request/Response/Headers APIs
+- [x] 03-03-PLAN.md — App Loader and JavaScript Handler Integration
+
+Note: HOST-02 (multi-app registry) deferred to post-v1.0. Single-app hosting is the MVP.
 
 ### Phase 4: Snapshots + Pooling
 **Goal**: Cold starts under 5ms via V8 snapshots and warm isolate pooling
@@ -73,7 +82,9 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 04-01: TBD
+- [x] 04-01-PLAN.md — Script Caching (compile once, reuse per request)
+- [ ] 04-02-PLAN.md — V8 Snapshots (deferred - callback serialization complex)
+- [ ] 04-03-PLAN.md — Isolate Pooling (deferred - single-threaded for v1.0)
 
 ### Phase 5: Production Hardening
 **Goal**: NANO is safe to run in production with untrusted code
@@ -96,8 +107,8 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. V8 Foundation | 0/3 | Planned | - |
-| 2. API Surface | 0/? | Not started | - |
-| 3. Multi-App Hosting | 0/? | Not started | - |
-| 4. Snapshots + Pooling | 0/? | Not started | - |
+| 1. V8 Foundation | 3/3 | Complete | 2026-01-24 |
+| 2. API Surface | 5/5 | Complete | 2026-01-24 |
+| 3. Multi-App Hosting | 3/3 | Complete | 2026-01-25 |
+| 4. Snapshots + Pooling | 1/3 | In Progress | - |
 | 5. Production Hardening | 0/? | Not started | - |

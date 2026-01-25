@@ -1,46 +1,42 @@
-// Fetch test app - tests synchronous fetch() usage
+// Fetch test app - tests async/await with fetch()
 let requestCount = 0;
 
 __setDefault({
-    fetch(request) {
+    // Async handler - returns a Promise that nano will await
+    async fetch(request) {
         requestCount++;
         const urlStr = request.url();
 
         console.log("Request", requestCount, "to", urlStr);
 
-        // Test fetch - the Promise resolves synchronously in our implementation
+        // Test async fetch with await
         if (urlStr.includes("/proxy")) {
-            // Use .then() to handle the Promise
-            const promise = fetch("https://httpbin.org/json");
+            try {
+                console.log("Starting fetch to httpbin.org...");
+                const response = await fetch("https://httpbin.org/json");
+                const status = response.status();
+                const body = response.text();
 
-            // Since our fetch is synchronous, the Promise should be resolved immediately
-            // We can access the result directly
-            let result = { error: "fetch not completed" };
+                console.log("Fetch completed, status:", status);
 
-            promise.then(function(response) {
-                console.log("Fetch completed, status:", response.status());
-                result = {
-                    status: response.status(),
-                    body: response.text()
-                };
-            }).catch(function(error) {
+                return new Response(body, {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" }
+                });
+            } catch (error) {
                 console.log("Fetch error:", error);
-                result = { error: String(error) };
-            });
-
-            // Return a response based on the fetch result
-            return new Response(JSON.stringify(result), {
-                status: 200,
-                headers: { "Content-Type": "application/json" }
-            });
+                return new Response(JSON.stringify({ error: String(error) }), {
+                    status: 500,
+                    headers: { "Content-Type": "application/json" }
+                });
+            }
         }
 
-        // Test simple endpoint
-        if (urlStr.includes("/test")) {
-            return new Response(JSON.stringify({
-                message: "Simple test works",
-                requestCount: requestCount
-            }), {
+        // Test simple async handler
+        if (urlStr.includes("/async")) {
+            // Simulate async work with a resolved Promise
+            const data = await Promise.resolve({ message: "Async works!", count: requestCount });
+            return new Response(JSON.stringify(data), {
                 status: 200,
                 headers: { "Content-Type": "application/json" }
             });
@@ -48,9 +44,9 @@ __setDefault({
 
         // Default response
         return new Response(JSON.stringify({
-            message: "Fetch test app",
+            message: "Fetch test app with async/await",
             requestCount: requestCount,
-            endpoints: ["/test", "/proxy"]
+            endpoints: ["/async", "/proxy"]
         }), {
             status: 200,
             headers: { "Content-Type": "application/json" }
