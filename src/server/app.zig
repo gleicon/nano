@@ -20,6 +20,10 @@ const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
 /// Default memory limit per isolate (128 MB)
 pub const DEFAULT_MEMORY_LIMIT_MB: usize = 128;
 
+/// Memory thresholds for graceful handling
+const GC_TRIGGER_THRESHOLD: f64 = 0.80; // Trigger GC at 80% usage
+const REJECT_THRESHOLD: f64 = 0.95; // Reject requests at 95% usage
+
 /// A loaded JavaScript application with V8 runtime and cached state
 pub const App = struct {
     allocator: std.mem.Allocator,
@@ -55,6 +59,51 @@ pub const App = struct {
         self.isolate.deinit();
         self.allocator.free(self.script_source);
         self.allocator.free(self.app_path);
+    }
+
+    /// Check memory usage and take action if needed
+    /// Returns: null if OK to proceed, error message if request should be rejected
+    pub fn checkMemory(self: *App) ?[]const u8 {
+        const stats = self.isolate.getHeapStatistics();
+        const limit = stats.heap_size_limit;
+        const used = stats.used_heap_size;
+
+        if (limit == 0) return null; // No limit set
+
+        const usage_ratio = @as(f64, @floatFromInt(used)) / @as(f64, @floatFromInt(limit));
+
+        // If usage exceeds GC threshold, trigger garbage collection
+        if (usage_ratio > GC_TRIGGER_THRESHOLD) {
+            const used_mb = @as(f64, @floatFromInt(used)) / (1024 * 1024);
+            const limit_mb = @as(f64, @floatFromInt(limit)) / (1024 * 1024);
+            std.debug.print("Memory warning: {d:.1}MB / {d:.1}MB ({d:.0}%) - triggering GC\n", .{ used_mb, limit_mb, usage_ratio * 100 });
+
+            self.isolate.lowMemoryNotification();
+
+            // Recheck after GC
+            const stats_after = self.isolate.getHeapStatistics();
+            const used_after = stats_after.used_heap_size;
+            const usage_after = @as(f64, @floatFromInt(used_after)) / @as(f64, @floatFromInt(limit));
+
+            const freed_mb = @as(f64, @floatFromInt(used -| used_after)) / (1024 * 1024);
+            std.debug.print("GC completed: freed {d:.1}MB, now at {d:.0}%\n", .{ freed_mb, usage_after * 100 });
+
+            // If still critically high, reject the request
+            if (usage_after > REJECT_THRESHOLD) {
+                std.debug.print("Memory critical: rejecting request ({d:.0}% > {d:.0}% threshold)\n", .{ usage_after * 100, REJECT_THRESHOLD * 100 });
+                return "Memory limit exceeded - request rejected";
+            }
+        }
+
+        return null;
+    }
+
+    /// Get current memory usage as percentage
+    pub fn getMemoryUsagePercent(self: *App) f64 {
+        const stats = self.isolate.getHeapStatistics();
+        const limit = stats.heap_size_limit;
+        if (limit == 0) return 0;
+        return @as(f64, @floatFromInt(stats.used_heap_size)) / @as(f64, @floatFromInt(limit)) * 100.0;
     }
 };
 
@@ -253,6 +302,15 @@ pub fn handleRequest(
     body: []const u8,
     allocator: std.mem.Allocator,
 ) HandleResult {
+    // Check memory before processing request (graceful OOM prevention)
+    if (app.checkMemory()) |mem_err| {
+        return .{
+            .status = 503,
+            .body = allocator.dupe(u8, mem_err) catch "Memory limit exceeded",
+            .content_type = "text/plain",
+        };
+    }
+
     const isolate = app.isolate;
 
     // Create handle scope for this request
