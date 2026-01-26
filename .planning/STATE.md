@@ -2,38 +2,37 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-01-19)
+See: .planning/PROJECT.md (updated 2026-01-26)
 
 **Core value:** Skip the container fleet entirely - one process hosts many isolated JS apps
-**Current focus:** Phase 1 - V8 Foundation
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 3 of 5 (Multi-App Hosting)
-Plan: Ready to start
-Status: Phase 2 complete, ready for Phase 3 planning
-Last activity: 2026-01-24 - Completed Crypto/Fetch APIs
+Phase: v1.0 complete
+Plan: -
+Status: Milestone v1.0 shipped, ready for next milestone
+Last activity: 2026-01-26 — v1.0 milestone complete
 
-Progress: [######....] 60% (overall)
+Progress: [##########] 100% (v1.0)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: -
-- Total execution time: 0 hours
+- Total plans completed: 14
+- Phases: 6
+- Timeline: 8 days
 
 **By Phase:**
 
-| Phase | Plans | Total | Avg/Plan |
-|-------|-------|-------|----------|
-| - | - | - | - |
-
-**Recent Trend:**
-- Last 5 plans: -
-- Trend: -
-
-*Updated after each plan completion*
+| Phase | Plans | Status |
+|-------|-------|--------|
+| 1. V8 Foundation | 3 | Complete |
+| 2. API Surface | 5 | Complete |
+| 3. Multi-App Hosting | 3 | Complete |
+| 4. Snapshots + Pooling | 1 | Complete (2 deferred) |
+| 5. Production Hardening | 1 | Complete |
+| 6. Async Runtime | 1 | Complete |
 
 ## Accumulated Context
 
@@ -42,20 +41,20 @@ Progress: [######....] 60% (overall)
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- None yet
+- Script caching over V8 snapshots (callback serialization too complex)
+- Single-threaded MVP (isolate pooling deferred)
+- libxev for event loop (cross-platform async I/O)
 
 ### Pending Todos
 
-None yet.
+None.
 
 ### Blockers/Concerns
 
-Research flagged open questions to validate in Phase 1:
-- Does zig-v8 fork work with Zig 0.14.0 out of the box?
-- What is V8 build time on target hardware?
+None — v1.0 shipped successfully.
 
 ## Session Continuity
 
-Last session: 2026-01-20
-Stopped at: Roadmap created, ready to plan Phase 1
+Last session: 2026-01-26
+Stopped at: v1.0 milestone complete
 Resume file: None
