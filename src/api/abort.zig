@@ -5,19 +5,13 @@ const v8 = @import("v8");
 pub fn registerAbortAPI(isolate: v8.Isolate, context: v8.Context) void {
     const global = context.getGlobal();
 
-    // Register AbortSignal constructor (not directly constructable, but needed for instanceof)
+    // Register AbortSignal constructor
+    // Note: Constructors set up plain properties (aborted, reason) on instances
     const signal_tmpl = v8.FunctionTemplate.initCallback(isolate, abortSignalConstructor);
     const signal_proto = signal_tmpl.getPrototypeTemplate();
 
-    // AbortSignal.aborted getter (returns boolean)
-    const aborted_fn = v8.FunctionTemplate.initCallback(isolate, signalAborted);
-    signal_proto.set(v8.String.initUtf8(isolate, "aborted").toName(), aborted_fn, v8.PropertyAttribute.None);
-
-    // AbortSignal.reason getter (returns reason or undefined)
-    const reason_fn = v8.FunctionTemplate.initCallback(isolate, signalReason);
-    signal_proto.set(v8.String.initUtf8(isolate, "reason").toName(), reason_fn, v8.PropertyAttribute.None);
-
-    // AbortSignal.throwIfAborted() method
+    // Only throwIfAborted is a method (Web API: signal.throwIfAborted())
+    // aborted and reason are plain properties set in constructor
     const throw_fn = v8.FunctionTemplate.initCallback(isolate, signalThrowIfAborted);
     signal_proto.set(v8.String.initUtf8(isolate, "throwIfAborted").toName(), throw_fn, v8.PropertyAttribute.None);
 
@@ -44,7 +38,7 @@ pub fn registerAbortAPI(isolate: v8.Isolate, context: v8.Context) void {
     const controller_tmpl = v8.FunctionTemplate.initCallback(isolate, abortControllerConstructor);
     const controller_proto = controller_tmpl.getPrototypeTemplate();
 
-    // AbortController.signal getter
+    // AbortController.signal getter (returns cached signal)
     const signal_getter_fn = v8.FunctionTemplate.initCallback(isolate, controllerSignal);
     controller_proto.set(v8.String.initUtf8(isolate, "signal").toName(), signal_getter_fn, v8.PropertyAttribute.None);
 
@@ -60,25 +54,19 @@ pub fn registerAbortAPI(isolate: v8.Isolate, context: v8.Context) void {
 }
 
 /// Create an AbortSignal object (internal helper)
-/// Creates a plain object with signal methods attached directly
+/// Uses plain properties for Web API compatibility (signal.aborted, not signal.aborted())
 pub fn createAbortSignal(isolate: v8.Isolate, context: v8.Context, aborted: bool, reason: ?v8.Value) v8.Object {
     const signal = v8.Object.init(isolate);
 
-    // Set internal state
-    _ = signal.setValue(context, v8.String.initUtf8(isolate, "_aborted"), v8.Value{ .handle = v8.Boolean.init(isolate, aborted).handle });
+    // Set state as plain properties (Web API: signal.aborted, signal.reason)
+    _ = signal.setValue(context, v8.String.initUtf8(isolate, "aborted"), v8.Value{ .handle = v8.Boolean.init(isolate, aborted).handle });
     if (reason) |r| {
-        _ = signal.setValue(context, v8.String.initUtf8(isolate, "_reason"), r);
+        _ = signal.setValue(context, v8.String.initUtf8(isolate, "reason"), r);
     } else {
-        _ = signal.setValue(context, v8.String.initUtf8(isolate, "_reason"), isolate.initUndefined().toValue());
+        _ = signal.setValue(context, v8.String.initUtf8(isolate, "reason"), isolate.initUndefined().toValue());
     }
 
-    // Add methods directly to the object
-    const aborted_fn = v8.FunctionTemplate.initCallback(isolate, signalAborted);
-    _ = signal.setValue(context, v8.String.initUtf8(isolate, "aborted"), aborted_fn.getFunction(context).toValue());
-
-    const reason_fn = v8.FunctionTemplate.initCallback(isolate, signalReason);
-    _ = signal.setValue(context, v8.String.initUtf8(isolate, "reason"), reason_fn.getFunction(context).toValue());
-
+    // throwIfAborted remains a method (Web API: signal.throwIfAborted())
     const throw_fn = v8.FunctionTemplate.initCallback(isolate, signalThrowIfAborted);
     _ = signal.setValue(context, v8.String.initUtf8(isolate, "throwIfAborted"), throw_fn.getFunction(context).toValue());
 
@@ -87,7 +75,7 @@ pub fn createAbortSignal(isolate: v8.Isolate, context: v8.Context, aborted: bool
 
 /// Check if a signal is aborted (for use by fetch and other APIs)
 pub fn isSignalAborted(isolate: v8.Isolate, context: v8.Context, signal: v8.Object) bool {
-    const aborted_val = signal.getValue(context, v8.String.initUtf8(isolate, "_aborted")) catch return false;
+    const aborted_val = signal.getValue(context, v8.String.initUtf8(isolate, "aborted")) catch return false;
     if (aborted_val.isBoolean()) {
         return aborted_val.toBoolean(isolate);
     }
@@ -96,7 +84,7 @@ pub fn isSignalAborted(isolate: v8.Isolate, context: v8.Context, signal: v8.Obje
 
 /// Get the abort reason from a signal
 pub fn getSignalReason(isolate: v8.Isolate, context: v8.Context, signal: v8.Object) v8.Value {
-    return signal.getValue(context, v8.String.initUtf8(isolate, "_reason")) catch isolate.initUndefined().toValue();
+    return signal.getValue(context, v8.String.initUtf8(isolate, "reason")) catch isolate.initUndefined().toValue();
 }
 
 // === AbortSignal implementation ===
@@ -107,35 +95,9 @@ fn abortSignalConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(
     const context = isolate.getCurrentContext();
     const this = info.getThis();
 
-    // Initialize as not aborted
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_aborted"), v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_reason"), isolate.initUndefined().toValue());
-}
-
-fn signalAborted(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
-
-    const aborted_val = this.getValue(context, v8.String.initUtf8(isolate, "_aborted")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
-        return;
-    };
-    info.getReturnValue().set(aborted_val);
-}
-
-fn signalReason(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
-
-    const reason_val = this.getValue(context, v8.String.initUtf8(isolate, "_reason")) catch {
-        info.getReturnValue().set(isolate.initUndefined().toValue());
-        return;
-    };
-    info.getReturnValue().set(reason_val);
+    // Initialize as plain properties (Web API: signal.aborted, signal.reason)
+    _ = this.setValue(context, v8.String.initUtf8(isolate, "aborted"), v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    _ = this.setValue(context, v8.String.initUtf8(isolate, "reason"), isolate.initUndefined().toValue());
 }
 
 fn signalThrowIfAborted(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
@@ -144,9 +106,9 @@ fn signalThrowIfAborted(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c
     const context = isolate.getCurrentContext();
     const this = info.getThis();
 
-    const aborted_val = this.getValue(context, v8.String.initUtf8(isolate, "_aborted")) catch return;
+    const aborted_val = this.getValue(context, v8.String.initUtf8(isolate, "aborted")) catch return;
     if (aborted_val.isBoolean() and aborted_val.isTrue()) {
-        const reason = this.getValue(context, v8.String.initUtf8(isolate, "_reason")) catch {
+        const reason = this.getValue(context, v8.String.initUtf8(isolate, "reason")) catch {
             _ = isolate.throwException(v8.String.initUtf8(isolate, "AbortError: The operation was aborted").toValue());
             return;
         };
@@ -234,9 +196,9 @@ fn controllerAbort(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
     if (!signal_val.isObject()) return;
     const signal = v8.Object{ .handle = @ptrCast(signal_val.handle) };
 
-    // Set aborted state
-    _ = signal.setValue(context, v8.String.initUtf8(isolate, "_aborted"), v8.Value{ .handle = v8.Boolean.init(isolate, true).handle });
-    _ = signal.setValue(context, v8.String.initUtf8(isolate, "_reason"), reason);
+    // Update the signal's plain properties (Web API compatible)
+    _ = signal.setValue(context, v8.String.initUtf8(isolate, "aborted"), v8.Value{ .handle = v8.Boolean.init(isolate, true).handle });
+    _ = signal.setValue(context, v8.String.initUtf8(isolate, "reason"), reason);
 
     // Note: Full implementation would dispatch 'abort' event to listeners
     // For basic usage, checking .aborted property is sufficient

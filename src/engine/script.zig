@@ -368,13 +368,13 @@ test "FormData getAll returns array" {
 }
 
 // === AbortController Tests ===
-// Note: In NANO, signal() is a method, not a getter property
+// Note: controller.signal() is a method, but signal.aborted is a plain property (Web API compatible)
 
 test "AbortController initial state" {
     ensureV8Init();
 
     const allocator = std.testing.allocator;
-    var result = runScript("new AbortController().signal().aborted()", allocator);
+    var result = runScript("new AbortController().signal().aborted", allocator);
     defer result.deinit(allocator);
 
     switch (result) {
@@ -392,7 +392,7 @@ test "AbortController abort changes state" {
     ensureV8Init();
 
     const allocator = std.testing.allocator;
-    var result = runScript("const ac = new AbortController(); ac.abort(); ac.signal().aborted()", allocator);
+    var result = runScript("const ac = new AbortController(); ac.abort(); ac.signal().aborted", allocator);
     defer result.deinit(allocator);
 
     switch (result) {

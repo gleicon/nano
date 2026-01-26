@@ -37,18 +37,18 @@ formData.delete('email');
 console.log('FormData after delete:', formData.has('email')); // Should be false
 
 // === AbortController API ===
-// Note: In NANO, signal() is a method, not a getter property
+// Note: controller.signal() is a method, but signal.aborted/reason are plain properties (Web API compatible)
 const controller = new AbortController();
 const signal = controller.signal(); // Call as method
 
-console.log('Signal initial aborted:', signal.aborted()); // Should be false
-console.log('Signal initial reason:', signal.reason()); // Should be undefined
+console.log('Signal initial aborted:', signal.aborted); // Should be false
+console.log('Signal initial reason:', signal.reason); // Should be undefined
 
 controller.abort('User cancelled');
 // Get signal again after abort to see updated state
 const signalAfter = controller.signal();
-console.log('Signal after abort:', signalAfter.aborted()); // Should be true
-console.log('Signal reason:', signalAfter.reason()); // Should be 'User cancelled'
+console.log('Signal after abort:', signalAfter.aborted); // Should be true
+console.log('Signal reason:', signalAfter.reason); // Should be 'User cancelled'
 
 // === crypto.subtle.sign/verify ===
 const key = 'my-secret-key';
