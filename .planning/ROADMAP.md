@@ -119,18 +119,19 @@ Plans:
 
 These items were part of original v1 scope but deferred for complexity:
 
-| Item | Reason | Original Requirement |
-|------|--------|---------------------|
-| V8 Snapshots | Callback serialization complex | CORE-03 |
-| Isolate Pooling | Single-threaded for v1.0 | CORE-04 |
-| Multi-App Registry | Single-app MVP sufficient | HOST-02 |
-| CPU Watchdog (infinite loops) | V8 interrupt API needs investigation | RLIM-02 |
-| Memory Limits | V8 heap limit configuration needed | RLIM-01 |
-| Per-App Config | Requires config file format design | RLIM-03 |
-| Streams API | Complex, rarely needed for Workers | WAPI-06 |
-| AbortController | Requires async cancellation design | HTTP-05 |
-| FormData/Blob/File | Requires binary data handling | HTTP-06, HTTP-07 |
-| crypto.subtle.sign/verify | Requires HMAC/RSA implementation | CRYP-04 |
+| Item | Reason | Original Requirement | Status |
+|------|--------|---------------------|--------|
+| V8 Snapshots | Callback serialization complex | CORE-03 | Deferred |
+| Isolate Pooling | Single-threaded for v1.0 | CORE-04 | Deferred |
+| Multi-App Registry | Single-app MVP sufficient | HOST-02 | Deferred |
+| CPU Watchdog (infinite loops) | V8 TerminateExecution API | RLIM-02 | **In Progress** |
+| Memory Limits | V8 ResourceConstraints API | RLIM-01 | **In Progress** |
+| Per-App Config | Config file format (JSON/TOML) | RLIM-03 | Deferred |
+| Multi-App Config File | Boot multiple apps from config | - | **Planned** |
+| Streams API | Complex, rarely needed for Workers | WAPI-06 | Deferred |
+| AbortController | Requires async cancellation design | HTTP-05 | Planned |
+| FormData/Blob/File | Requires binary data handling | HTTP-06, HTTP-07 | Planned |
+| crypto.subtle.sign/verify | Requires HMAC/RSA implementation | CRYP-04 | Planned |
 
 ## Progress
 

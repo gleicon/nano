@@ -99,6 +99,14 @@ pub fn build(b: *std.Build) void {
     timers_module.addImport("v8", v8_module);
     timers_module.addImport("event_loop", event_loop_module);
 
+    // Create runtime/watchdog module
+    const watchdog_module = b.createModule(.{
+        .root_source_file = b.path("src/runtime/watchdog.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    watchdog_module.addImport("v8", v8_module);
+
     // Create engine/error module
     const error_module = b.createModule(.{
         .root_source_file = b.path("src/engine/error.zig"),
@@ -157,6 +165,7 @@ pub fn build(b: *std.Build) void {
     app_module.addImport("request", request_module);
     app_module.addImport("timers", timers_module);
     app_module.addImport("event_loop", event_loop_module);
+    app_module.addImport("watchdog", watchdog_module);
 
     // Create server/metrics module
     const metrics_module = b.createModule(.{

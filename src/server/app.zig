@@ -9,9 +9,13 @@ const headers = @import("headers");
 const request_api = @import("request");
 const timers = @import("timers");
 const EventLoop = @import("event_loop").EventLoop;
+const watchdog = @import("watchdog");
 
 // Get the array buffer allocator type
 const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
+
+/// Default memory limit per isolate (128 MB)
+pub const DEFAULT_MEMORY_LIMIT_MB: usize = 128;
 
 /// A loaded JavaScript application with V8 runtime and cached state
 pub const App = struct {
@@ -28,6 +32,10 @@ pub const App = struct {
     initialized: bool,
     // Event loop reference for async operations (set by server)
     event_loop: ?*EventLoop = null,
+    // Timeout for script execution (default 5s for requests with external calls)
+    timeout_ms: u64 = watchdog.EXTENDED_TIMEOUT_MS,
+    // Memory limit in MB (0 = no limit, default 128MB)
+    memory_limit_mb: usize = DEFAULT_MEMORY_LIMIT_MB,
 
     pub fn deinit(self: *App) void {
         // Clean up persistent handles first
@@ -74,6 +82,16 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
     // Create isolate for this app - it persists for app lifetime
     var params = v8.initCreateParams();
     params.array_buffer_allocator = array_buffer_allocator;
+
+    // Configure memory limits (128 MB default)
+    const initial_heap_size = 4 * 1024 * 1024; // 4 MB initial
+    const max_heap_size = DEFAULT_MEMORY_LIMIT_MB * 1024 * 1024;
+    v8.c.v8__ResourceConstraints__ConfigureDefaultsFromHeapSize(
+        &params.constraints,
+        initial_heap_size,
+        max_heap_size,
+    );
+
     var isolate = v8.Isolate.init(&params);
     isolate.enter();
 
@@ -249,6 +267,17 @@ pub fn handleRequest(
     try_catch.init(isolate);
     defer try_catch.deinit();
 
+    // Start CPU watchdog to prevent infinite loops
+    var wd = watchdog.Watchdog.init(isolate, app.timeout_ms);
+    wd.start() catch {
+        return .{
+            .status = 500,
+            .body = allocator.dupe(u8, "Failed to start execution watchdog") catch "Error",
+            .content_type = "text/plain",
+        };
+    };
+    defer wd.stop();
+
     // Build full URL for the request
     var url_buf: [2048]u8 = undefined;
     const full_url = std.fmt.bufPrint(&url_buf, "http://localhost{s}", .{path}) catch path;
@@ -260,6 +289,14 @@ pub fn handleRequest(
     const fetch_fn = v8.Function{ .handle = @ptrCast(fetch_val.handle) };
     var fetch_args: [1]v8.Value = .{v8.Value{ .handle = @ptrCast(request_obj.handle) }};
     const handler_result = fetch_fn.call(context, exports, &fetch_args) orelse {
+        // Check if terminated by watchdog
+        if (wd.wasTerminated()) {
+            return .{
+                .status = 408,
+                .body = allocator.dupe(u8, "Script execution timed out") catch "Timeout",
+                .content_type = "text/plain",
+            };
+        }
         if (try_catch.hasCaught()) {
             return errorResponse(isolate, &try_catch, context, allocator);
         }
