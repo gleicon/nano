@@ -106,6 +106,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Create config module
+    const config_module = b.createModule(.{
+        .root_source_file = b.path("src/config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Create runtime/event_loop module
     const event_loop_module = b.createModule(.{
         .root_source_file = b.path("src/runtime/event_loop.zig"),
@@ -231,6 +238,7 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("repl", repl_module);
     root_module.addImport("server", server_module);
     root_module.addImport("log", log_module);
+    root_module.addImport("config", config_module);
 
     // Main executable
     const exe = b.addExecutable(.{
@@ -289,6 +297,19 @@ pub fn build(b: *std.Build) void {
     script_tests.linkLibCpp();
 
     const run_script_tests = b.addRunArtifact(script_tests);
+
+    // Config module tests (no V8 dependency)
+    const config_test_module = b.createModule(.{
+        .root_source_file = b.path("src/config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const config_tests = b.addTest(.{
+        .root_module = config_test_module,
+    });
+    const run_config_tests = b.addRunArtifact(config_tests);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_script_tests.step);
+    test_step.dependOn(&run_config_tests.step);
 }

@@ -3,6 +3,7 @@ const v8 = @import("v8");
 const script = @import("script");
 const repl = @import("repl");
 const server = @import("server");
+const config = @import("config");
 
 const usage =
     \\Usage: nano <command> [arguments]
@@ -15,12 +16,16 @@ const usage =
     \\
     \\Serve options:
     \\  --port <port>    Port to listen on (default: 8080)
+    \\  --config <file>  Load multi-app configuration from JSON file
+    \\  <path>           App directory path (single app mode)
     \\
     \\Examples:
     \\  nano eval "1 + 1"
     \\  nano eval "Math.sqrt(16)"
     \\  nano repl
     \\  nano serve --port 8080
+    \\  nano serve ./my-app --port 3000
+    \\  nano serve --config nano.json
     \\
 ;
 
@@ -60,6 +65,7 @@ pub fn main() !void {
     if (std.mem.eql(u8, command, "serve")) {
         var port: u16 = 8080; // default port
         var app_path: ?[]const u8 = null;
+        var config_path: ?[]const u8 = null;
 
         // Parse serve options
         while (args.next()) |arg| {
@@ -72,12 +78,30 @@ pub fn main() !void {
                     stderr_file.writeAll("Error: invalid port number\n") catch {};
                     std.process.exit(1);
                 };
+            } else if (std.mem.eql(u8, arg, "--config")) {
+                config_path = args.next() orelse {
+                    stderr_file.writeAll("Error: --config requires a file path\n") catch {};
+                    std.process.exit(1);
+                };
             } else if (!std.mem.startsWith(u8, arg, "-")) {
                 // Non-option argument is the app path
                 app_path = arg;
             }
         }
 
+        // Multi-app mode with config file
+        if (config_path) |cfg_path| {
+            serveMultiApp(cfg_path, stderr_file) catch |err| {
+                stderr_file.writeAll("Config error: ") catch {};
+                const err_name = @errorName(err);
+                stderr_file.writeAll(err_name) catch {};
+                stderr_file.writeAll("\n") catch {};
+                std.process.exit(1);
+            };
+            return;
+        }
+
+        // Single app mode
         server.serve(port, app_path) catch |err| {
             stderr_file.writeAll("Server error: ") catch {};
             const err_name = @errorName(err);
@@ -93,6 +117,53 @@ pub fn main() !void {
     stderr_file.writeAll("\n\n") catch {};
     stderr_file.writeAll(usage) catch {};
     std.process.exit(1);
+}
+
+fn serveMultiApp(config_path: []const u8, stderr: std.fs.File) !void {
+    const stdout = std.fs.File{ .handle = std.posix.STDOUT_FILENO };
+    const allocator = std.heap.page_allocator;
+
+    // Load config
+    var cfg = config.loadConfig(allocator, config_path) catch |err| {
+        stderr.writeAll("Failed to load config: ") catch {};
+        stderr.writeAll(config_path) catch {};
+        stderr.writeAll("\n") catch {};
+        return err;
+    };
+    defer cfg.deinit();
+
+    stdout.writeAll("NANO Multi-App Mode\n") catch {};
+    stdout.writeAll("===================\n\n") catch {};
+
+    // Print loaded apps
+    var buf: [256]u8 = undefined;
+    const app_count = std.fmt.bufPrint(&buf, "Loaded {d} app(s) from config:\n\n", .{cfg.apps.len}) catch "Apps loaded\n";
+    stdout.writeAll(app_count) catch {};
+
+    for (cfg.apps) |app| {
+        const line = std.fmt.bufPrint(&buf, "  [{s}] port:{d} timeout:{d}ms memory:{d}MB\n    path: {s}\n\n", .{
+            app.name,
+            app.port,
+            app.timeout_ms,
+            app.memory_mb,
+            app.path,
+        }) catch continue;
+        stdout.writeAll(line) catch {};
+    }
+
+    // For MVP, start only the first app (multi-threaded server is future work)
+    if (cfg.apps.len > 0) {
+        const first_app = cfg.apps[0];
+        const starting = std.fmt.bufPrint(&buf, "Starting [{s}] on port {d}...\n", .{ first_app.name, first_app.port }) catch "Starting...\n";
+        stdout.writeAll(starting) catch {};
+
+        // TODO: For full multi-app, spawn threads for each app
+        // For now, serve the first app with its configured settings
+        try server.serveWithConfig(first_app.port, first_app.path, first_app.timeout_ms, first_app.memory_mb);
+    } else {
+        stderr.writeAll("No apps defined in config\n") catch {};
+        return error.NoApps;
+    }
 }
 
 fn evalCommand(script_source: []const u8, stdout: std.fs.File, stderr: std.fs.File) !void {

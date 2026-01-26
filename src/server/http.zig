@@ -328,12 +328,27 @@ fn handleSignal(_: c_int) callconv(.c) void {
 
 /// Start HTTP server on specified port with optional app path
 pub fn serve(port: u16, app_path: ?[]const u8) !void {
+    try serveWithConfig(port, app_path, null, null);
+}
+
+/// Start HTTP server with full configuration options
+pub fn serveWithConfig(port: u16, app_path: ?[]const u8, timeout_ms: ?u64, memory_mb: ?usize) !void {
     var server = try HttpServer.init(port, std.heap.page_allocator);
     defer server.deinit();
 
     // Load app after server init (event loop pointer is now stable)
     if (app_path) |path| {
         try server.loadApp(path);
+
+        // Apply config settings to the loaded app
+        if (server.app) |*app| {
+            if (timeout_ms) |t| {
+                app.timeout_ms = t;
+            }
+            if (memory_mb) |m| {
+                app.memory_limit_mb = m;
+            }
+        }
     }
 
     // Install signal handlers for graceful shutdown

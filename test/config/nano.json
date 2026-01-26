@@ -1,0 +1,22 @@
+{
+  "apps": [
+    {
+      "name": "app-a",
+      "path": "./test/fixtures/apps/app-a",
+      "port": 8081,
+      "timeout_ms": 5000,
+      "memory_mb": 128
+    },
+    {
+      "name": "app-b",
+      "path": "./test/fixtures/apps/app-b",
+      "port": 8082,
+      "timeout_ms": 3000,
+      "memory_mb": 64
+    }
+  ],
+  "defaults": {
+    "timeout_ms": 5000,
+    "memory_mb": 128
+  }
+}
