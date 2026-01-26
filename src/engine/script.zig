@@ -8,6 +8,7 @@ const crypto = @import("crypto");
 const fetch = @import("fetch");
 const headers = @import("headers");
 const request = @import("request");
+const abort = @import("abort");
 
 pub const ScriptError = error_mod.ScriptError;
 pub const extractError = error_mod.extractError;
@@ -64,6 +65,7 @@ pub fn runScript(
     fetch.registerFetchAPI(isolate, context);
     headers.registerHeadersAPI(isolate, context);
     request.registerRequestAPI(isolate, context);
+    abort.registerAbortAPI(isolate, context);
 
     // Set up TryCatch for error handling - must be stack allocated
     var try_catch: v8.TryCatch = undefined;

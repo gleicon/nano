@@ -75,6 +75,14 @@ pub fn build(b: *std.Build) void {
     });
     request_module.addImport("v8", v8_module);
 
+    // Create api/abort module
+    const abort_module = b.createModule(.{
+        .root_source_file = b.path("src/api/abort.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    abort_module.addImport("v8", v8_module);
+
     // Create log module
     const log_module = b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
@@ -131,6 +139,7 @@ pub fn build(b: *std.Build) void {
     script_module.addImport("headers", headers_module);
     script_module.addImport("request", request_module);
     script_module.addImport("timers", timers_module);
+    script_module.addImport("abort", abort_module);
 
     // Create repl module
     const repl_module = b.createModule(.{
@@ -148,6 +157,7 @@ pub fn build(b: *std.Build) void {
     repl_module.addImport("request", request_module);
     repl_module.addImport("timers", timers_module);
     repl_module.addImport("event_loop", event_loop_module);
+    repl_module.addImport("abort", abort_module);
 
     // Create server/app module (with V8 dependency)
     const app_module = b.createModule(.{
@@ -166,6 +176,7 @@ pub fn build(b: *std.Build) void {
     app_module.addImport("timers", timers_module);
     app_module.addImport("event_loop", event_loop_module);
     app_module.addImport("watchdog", watchdog_module);
+    app_module.addImport("abort", abort_module);
 
     // Create server/metrics module
     const metrics_module = b.createModule(.{
@@ -239,6 +250,7 @@ pub fn build(b: *std.Build) void {
     script_test_module.addImport("fetch", fetch_module);
     script_test_module.addImport("headers", headers_module);
     script_test_module.addImport("request", request_module);
+    script_test_module.addImport("abort", abort_module);
 
     // Test step for script module
     const script_tests = b.addTest(.{

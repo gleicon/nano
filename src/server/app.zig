@@ -10,6 +10,7 @@ const request_api = @import("request");
 const timers = @import("timers");
 const EventLoop = @import("event_loop").EventLoop;
 const watchdog = @import("watchdog");
+const abort = @import("abort");
 
 // Get the array buffer allocator type
 const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
@@ -112,6 +113,7 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
     headers.registerHeadersAPI(isolate, context);
     request_api.registerRequestAPI(isolate, context);
     timers.registerTimerAPIs(isolate, context);
+    abort.registerAbortAPI(isolate, context);
 
     // Wrap and compile the script
     const wrapped_source_buf = allocator.alloc(u8, 1024 * 1024 + 1024) catch {
