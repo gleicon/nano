@@ -8,6 +8,17 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 **Skip the container fleet entirely.** One NANO process replaces dozens of Node containers, their image builds, fleet management, and routing infrastructure — while maintaining isolation between apps.
 
+## Current Milestone: v1.1 Multi-App Hosting
+
+**Goal:** Transform NANO from single-app to multi-app runtime with virtual host routing.
+
+**Target features:**
+- Multi-app registry (config file + folder discovery)
+- Virtual host routing (multiple apps on same port)
+- Per-app configuration (limits, entry point, env vars, custom routes)
+
+---
+
 ## Current State (v1.0 Shipped)
 
 **Version:** v1.0 MVP (shipped 2026-01-26)
@@ -42,13 +53,17 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 - Structured logging per app — v1.0
 - Hard isolation between apps (memory, CPU limits enforced) — v1.0
 
-### Active (v2 candidates)
+### Active (v1.1)
+
+- [ ] Multi-app registry (config file + folder discovery)
+- [ ] Virtual host routing (multiple apps on same port)
+- [ ] Per-app configuration (limits, entry point, env vars, custom routes)
+
+### Future (v2 candidates)
 
 - [ ] Sub-5ms cold start for new isolates (via V8 snapshots)
-- [ ] Multi-app registry (multiple apps in single process)
-- [ ] Per-app configuration (custom limits, settings)
 - [ ] Streams API (ReadableStream, WritableStream)
-- [ ] Virtual host routing (multiple apps on same port)
+- [ ] Isolate pooling (warm isolate reuse)
 
 ### Out of Scope
 
@@ -98,4 +113,4 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 | libxev for event loop | Cross-platform, async I/O | Good — timer + fetch work |
 
 ---
-*Last updated: 2026-01-26 after v1.0 milestone*
+*Last updated: 2026-01-26 after v1.1 milestone start*

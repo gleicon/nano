@@ -5,34 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-01-26)
 
 **Core value:** Skip the container fleet entirely - one process hosts many isolated JS apps
-**Current focus:** Planning next milestone
+**Current focus:** Milestone v1.1 — Multi-App Hosting
 
 ## Current Position
 
-Phase: v1.0 complete
-Plan: -
-Status: Milestone v1.0 shipped, ready for next milestone
-Last activity: 2026-01-26 — v1.0 milestone complete
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-01-26 — Milestone v1.1 started
 
-Progress: [##########] 100% (v1.0)
+Progress: [░░░░░░░░░░] 0% (v1.1)
 
 ## Performance Metrics
 
-**Velocity:**
+**Velocity (from v1.0):**
 - Total plans completed: 14
 - Phases: 6
 - Timeline: 8 days
-
-**By Phase:**
-
-| Phase | Plans | Status |
-|-------|-------|--------|
-| 1. V8 Foundation | 3 | Complete |
-| 2. API Surface | 5 | Complete |
-| 3. Multi-App Hosting | 3 | Complete |
-| 4. Snapshots + Pooling | 1 | Complete (2 deferred) |
-| 5. Production Hardening | 1 | Complete |
-| 6. Async Runtime | 1 | Complete |
 
 ## Accumulated Context
 
@@ -51,10 +40,10 @@ None.
 
 ### Blockers/Concerns
 
-None — v1.0 shipped successfully.
+None.
 
 ## Session Continuity
 
 Last session: 2026-01-26
-Stopped at: v1.0 milestone complete
+Stopped at: Starting milestone v1.1
 Resume file: None
