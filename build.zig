@@ -309,7 +309,20 @@ pub fn build(b: *std.Build) void {
     });
     const run_config_tests = b.addRunArtifact(config_tests);
 
+    // Fetch module tests (SSRF protection - no V8 dependency)
+    const fetch_test_module = b.createModule(.{
+        .root_source_file = b.path("src/api/fetch.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fetch_test_module.addImport("v8", v8_module);
+    const fetch_tests = b.addTest(.{
+        .root_module = fetch_test_module,
+    });
+    const run_fetch_tests = b.addRunArtifact(fetch_tests);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_script_tests.step);
     test_step.dependOn(&run_config_tests.step);
+    test_step.dependOn(&run_fetch_tests.step);
 }

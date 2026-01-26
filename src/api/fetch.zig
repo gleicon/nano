@@ -5,6 +5,87 @@ const http = std.http;
 /// Allocator for HTTP operations
 const fetch_allocator = std.heap.page_allocator;
 
+// === SSRF Protection ===
+// Block requests to internal/private networks to prevent Server-Side Request Forgery
+
+/// Check if hostname is a private/internal address that should be blocked
+fn isBlockedHost(host: []const u8) bool {
+    // Block localhost variants
+    if (std.mem.eql(u8, host, "localhost") or
+        std.mem.eql(u8, host, "127.0.0.1") or
+        std.mem.eql(u8, host, "::1") or
+        std.mem.eql(u8, host, "[::1]") or
+        std.mem.eql(u8, host, "0.0.0.0"))
+    {
+        return true;
+    }
+
+    // Block cloud metadata endpoints (AWS, GCP, Azure, DigitalOcean, etc.)
+    if (std.mem.eql(u8, host, "169.254.169.254") or
+        std.mem.eql(u8, host, "metadata.google.internal") or
+        std.mem.eql(u8, host, "metadata.goog") or
+        std.mem.eql(u8, host, "100.100.100.200"))
+    { // Alibaba
+        return true;
+    }
+
+    // Block private IP ranges by parsing as IP
+    if (isPrivateIP(host)) {
+        return true;
+    }
+
+    return false;
+}
+
+/// Check if string represents a private IP address
+fn isPrivateIP(host: []const u8) bool {
+    // Try to parse as IPv4
+    var parts: [4]u8 = undefined;
+    var part_idx: usize = 0;
+    var current: u16 = 0;
+    var has_digit = false;
+
+    for (host) |c| {
+        if (c >= '0' and c <= '9') {
+            current = current * 10 + (c - '0');
+            if (current > 255) return false;
+            has_digit = true;
+        } else if (c == '.') {
+            if (!has_digit or part_idx >= 3) return false;
+            parts[part_idx] = @truncate(current);
+            part_idx += 1;
+            current = 0;
+            has_digit = false;
+        } else {
+            return false; // Not a valid IPv4
+        }
+    }
+
+    if (!has_digit or part_idx != 3) return false;
+    parts[3] = @truncate(current);
+
+    // Check private ranges:
+    // 10.0.0.0/8 (Class A private)
+    if (parts[0] == 10) return true;
+
+    // 172.16.0.0/12 (Class B private)
+    if (parts[0] == 172 and parts[1] >= 16 and parts[1] <= 31) return true;
+
+    // 192.168.0.0/16 (Class C private)
+    if (parts[0] == 192 and parts[1] == 168) return true;
+
+    // 169.254.0.0/16 (link-local)
+    if (parts[0] == 169 and parts[1] == 254) return true;
+
+    // 127.0.0.0/8 (loopback)
+    if (parts[0] == 127) return true;
+
+    // 0.0.0.0/8 (current network)
+    if (parts[0] == 0) return true;
+
+    return false;
+}
+
 /// Register fetch API and Response class on global object
 pub fn registerFetchAPI(isolate: v8.Isolate, context: v8.Context) void {
     const global = context.getGlobal();
@@ -193,6 +274,17 @@ const FetchResult = struct {
 fn doFetch(url: []const u8, method: []const u8, body: []const u8) !FetchResult {
     // Parse URI
     const uri = std.Uri.parse(url) catch return error.InvalidUrl;
+
+    // SSRF Protection: Block requests to internal/private addresses
+    if (uri.host) |host_component| {
+        const host = switch (host_component) {
+            .raw => |raw| raw,
+            .percent_encoded => |encoded| encoded,
+        };
+        if (isBlockedHost(host)) {
+            return error.BlockedHost;
+        }
+    }
 
     // Create HTTP client
     var client = http.Client{ .allocator = fetch_allocator };
@@ -507,6 +599,57 @@ fn responseJsonStatic(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
     };
 
     info.getReturnValue().set(v8.Value{ .handle = @ptrCast(response.handle) });
+}
+
+// === SSRF Protection Tests ===
+
+test "isBlockedHost blocks localhost" {
+    try std.testing.expect(isBlockedHost("localhost"));
+    try std.testing.expect(isBlockedHost("127.0.0.1"));
+    try std.testing.expect(isBlockedHost("::1"));
+    try std.testing.expect(isBlockedHost("[::1]"));
+    try std.testing.expect(isBlockedHost("0.0.0.0"));
+}
+
+test "isBlockedHost blocks cloud metadata" {
+    try std.testing.expect(isBlockedHost("169.254.169.254")); // AWS/Azure/GCP
+    try std.testing.expect(isBlockedHost("metadata.google.internal")); // GCP
+}
+
+test "isPrivateIP blocks private ranges" {
+    // Class A private (10.0.0.0/8)
+    try std.testing.expect(isPrivateIP("10.0.0.1"));
+    try std.testing.expect(isPrivateIP("10.255.255.255"));
+
+    // Class B private (172.16.0.0/12)
+    try std.testing.expect(isPrivateIP("172.16.0.1"));
+    try std.testing.expect(isPrivateIP("172.31.255.255"));
+    try std.testing.expect(!isPrivateIP("172.15.0.1")); // Just outside range
+    try std.testing.expect(!isPrivateIP("172.32.0.1")); // Just outside range
+
+    // Class C private (192.168.0.0/16)
+    try std.testing.expect(isPrivateIP("192.168.0.1"));
+    try std.testing.expect(isPrivateIP("192.168.255.255"));
+
+    // Link-local (169.254.0.0/16)
+    try std.testing.expect(isPrivateIP("169.254.0.1"));
+
+    // Loopback (127.0.0.0/8)
+    try std.testing.expect(isPrivateIP("127.0.0.1"));
+    try std.testing.expect(isPrivateIP("127.255.255.255"));
+}
+
+test "isPrivateIP allows public IPs" {
+    try std.testing.expect(!isPrivateIP("8.8.8.8")); // Google DNS
+    try std.testing.expect(!isPrivateIP("1.1.1.1")); // Cloudflare DNS
+    try std.testing.expect(!isPrivateIP("93.184.216.34")); // example.com
+    try std.testing.expect(!isPrivateIP("104.21.234.56")); // Cloudflare
+}
+
+test "isBlockedHost allows public hostnames" {
+    try std.testing.expect(!isBlockedHost("example.com"));
+    try std.testing.expect(!isBlockedHost("api.github.com"));
+    try std.testing.expect(!isBlockedHost("8.8.8.8"));
 }
 
 // Static method: Response.redirect(url, status)
