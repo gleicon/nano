@@ -42,13 +42,25 @@ __setDefault({
             });
         }
 
-        // Default response
+        // Root path - show info
+        if (urlStr.endsWith("/") || urlStr === "http://localhost") {
+            return new Response(JSON.stringify({
+                message: "Fetch test app with async/await",
+                requestCount: requestCount,
+                endpoints: ["/async", "/proxy"]
+            }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" }
+            });
+        }
+
+        // 404 for all other paths
+        const url = new URL(urlStr);
         return new Response(JSON.stringify({
-            message: "Fetch test app with async/await",
-            requestCount: requestCount,
-            endpoints: ["/async", "/proxy"]
+            error: "Not Found",
+            path: url.pathname()
         }), {
-            status: 200,
+            status: 404,
             headers: { "Content-Type": "application/json" }
         });
     }
