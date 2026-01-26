@@ -8,6 +8,8 @@ const fetch = @import("fetch");
 const headers_api = @import("headers");
 const request_api = @import("request");
 const abort = @import("abort");
+const blob = @import("blob");
+const formdata = @import("formdata");
 
 /// Read a line from stdin into buffer, returns slice or null on EOF
 fn readLine(buf: []u8) ?[]u8 {
@@ -76,6 +78,8 @@ pub fn runRepl() !void {
     headers_api.registerHeadersAPI(isolate, context);
     request_api.registerRequestAPI(isolate, context);
     abort.registerAbortAPI(isolate, context);
+    blob.registerBlobAPI(isolate, context);
+    formdata.registerFormDataAPI(isolate, context);
 
     // Print banner
     stdout.writeAll("nano REPL (V8 ") catch {};

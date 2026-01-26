@@ -60,17 +60,9 @@ pub fn registerAbortAPI(isolate: v8.Isolate, context: v8.Context) void {
 }
 
 /// Create an AbortSignal object (internal helper)
+/// Creates a plain object with signal methods attached directly
 pub fn createAbortSignal(isolate: v8.Isolate, context: v8.Context, aborted: bool, reason: ?v8.Value) v8.Object {
-    const global = context.getGlobal();
-    const signal_ctor_val = global.getValue(context, v8.String.initUtf8(isolate, "AbortSignal")) catch {
-        return isolate.initObjectTemplateDefault().initInstance(context);
-    };
-    const signal_ctor = v8.Function{ .handle = @ptrCast(signal_ctor_val.handle) };
-
-    var args: [0]v8.Value = .{};
-    const signal = signal_ctor.initInstance(context, &args) orelse {
-        return isolate.initObjectTemplateDefault().initInstance(context);
-    };
+    const signal = v8.Object.init(isolate);
 
     // Set internal state
     _ = signal.setValue(context, v8.String.initUtf8(isolate, "_aborted"), v8.Value{ .handle = v8.Boolean.init(isolate, aborted).handle });
@@ -79,6 +71,16 @@ pub fn createAbortSignal(isolate: v8.Isolate, context: v8.Context, aborted: bool
     } else {
         _ = signal.setValue(context, v8.String.initUtf8(isolate, "_reason"), isolate.initUndefined().toValue());
     }
+
+    // Add methods directly to the object
+    const aborted_fn = v8.FunctionTemplate.initCallback(isolate, signalAborted);
+    _ = signal.setValue(context, v8.String.initUtf8(isolate, "aborted"), aborted_fn.getFunction(context).toValue());
+
+    const reason_fn = v8.FunctionTemplate.initCallback(isolate, signalReason);
+    _ = signal.setValue(context, v8.String.initUtf8(isolate, "reason"), reason_fn.getFunction(context).toValue());
+
+    const throw_fn = v8.FunctionTemplate.initCallback(isolate, signalThrowIfAborted);
+    _ = signal.setValue(context, v8.String.initUtf8(isolate, "throwIfAborted"), throw_fn.getFunction(context).toValue());
 
     return signal;
 }

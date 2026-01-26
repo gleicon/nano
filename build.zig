@@ -83,6 +83,22 @@ pub fn build(b: *std.Build) void {
     });
     abort_module.addImport("v8", v8_module);
 
+    // Create api/blob module
+    const blob_module = b.createModule(.{
+        .root_source_file = b.path("src/api/blob.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    blob_module.addImport("v8", v8_module);
+
+    // Create api/formdata module
+    const formdata_module = b.createModule(.{
+        .root_source_file = b.path("src/api/formdata.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    formdata_module.addImport("v8", v8_module);
+
     // Create log module
     const log_module = b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
@@ -140,6 +156,8 @@ pub fn build(b: *std.Build) void {
     script_module.addImport("request", request_module);
     script_module.addImport("timers", timers_module);
     script_module.addImport("abort", abort_module);
+    script_module.addImport("blob", blob_module);
+    script_module.addImport("formdata", formdata_module);
 
     // Create repl module
     const repl_module = b.createModule(.{
@@ -158,6 +176,8 @@ pub fn build(b: *std.Build) void {
     repl_module.addImport("timers", timers_module);
     repl_module.addImport("event_loop", event_loop_module);
     repl_module.addImport("abort", abort_module);
+    repl_module.addImport("blob", blob_module);
+    repl_module.addImport("formdata", formdata_module);
 
     // Create server/app module (with V8 dependency)
     const app_module = b.createModule(.{
@@ -177,6 +197,8 @@ pub fn build(b: *std.Build) void {
     app_module.addImport("event_loop", event_loop_module);
     app_module.addImport("watchdog", watchdog_module);
     app_module.addImport("abort", abort_module);
+    app_module.addImport("blob", blob_module);
+    app_module.addImport("formdata", formdata_module);
 
     // Create server/metrics module
     const metrics_module = b.createModule(.{
@@ -251,6 +273,8 @@ pub fn build(b: *std.Build) void {
     script_test_module.addImport("headers", headers_module);
     script_test_module.addImport("request", request_module);
     script_test_module.addImport("abort", abort_module);
+    script_test_module.addImport("blob", blob_module);
+    script_test_module.addImport("formdata", formdata_module);
 
     // Test step for script module
     const script_tests = b.addTest(.{

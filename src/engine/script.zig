@@ -9,6 +9,8 @@ const fetch = @import("fetch");
 const headers = @import("headers");
 const request = @import("request");
 const abort = @import("abort");
+const blob = @import("blob");
+const formdata = @import("formdata");
 
 pub const ScriptError = error_mod.ScriptError;
 pub const extractError = error_mod.extractError;
@@ -66,6 +68,8 @@ pub fn runScript(
     headers.registerHeadersAPI(isolate, context);
     request.registerRequestAPI(isolate, context);
     abort.registerAbortAPI(isolate, context);
+    blob.registerBlobAPI(isolate, context);
+    formdata.registerFormDataAPI(isolate, context);
 
     // Set up TryCatch for error handling - must be stack allocated
     var try_catch: v8.TryCatch = undefined;
@@ -209,6 +213,275 @@ test "eval reference error" {
         .err => |e| {
             // ReferenceError for undefined variable
             try std.testing.expect(e.message.len > 0);
+        },
+    }
+}
+
+// === Blob API Tests ===
+
+test "Blob creation and size" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("new Blob(['hello']).size()", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("5", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "Blob with multiple parts" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("new Blob(['hello', ' ', 'world']).size()", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("11", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "Blob type property" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("new Blob(['test'], {type: 'text/plain'}).type()", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("text/plain", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+// === File API Tests ===
+
+test "File creation with name" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("new File(['content'], 'test.txt').name()", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("test.txt", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "File size" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("new File(['hello world'], 'test.txt').size()", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("11", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+// === FormData API Tests ===
+
+test "FormData append and get" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("const fd = new FormData(); fd.append('name', 'John'); fd.get('name')", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("John", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "FormData has" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("const fd = new FormData(); fd.append('key', 'val'); fd.has('key')", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("true", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "FormData getAll returns array" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("const fd = new FormData(); fd.append('x', 'a'); fd.append('x', 'b'); fd.getAll('x').length", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("2", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+// === AbortController Tests ===
+// Note: In NANO, signal() is a method, not a getter property
+
+test "AbortController initial state" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("new AbortController().signal().aborted()", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("false", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "AbortController abort changes state" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("const ac = new AbortController(); ac.abort(); ac.signal().aborted()", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("true", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+// === crypto.subtle.sign/verify Tests ===
+
+test "crypto.subtle.sign returns ArrayBuffer" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("crypto.subtle.sign('HMAC', 'secret', 'data').byteLength", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("32", value); // SHA-256 = 32 bytes
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "crypto.subtle.verify valid signature" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript(
+        \\const sig = crypto.subtle.sign('HMAC', 'key', 'message');
+        \\crypto.subtle.verify('HMAC', 'key', sig, 'message')
+    , allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("true", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "crypto.subtle.verify invalid signature" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript(
+        \\const sig = crypto.subtle.sign('HMAC', 'key', 'message');
+        \\crypto.subtle.verify('HMAC', 'wrong-key', sig, 'message')
+    , allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("false", value);
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
+        },
+    }
+}
+
+test "crypto.subtle.sign SHA-512" {
+    ensureV8Init();
+
+    const allocator = std.testing.allocator;
+    var result = runScript("crypto.subtle.sign({name: 'HMAC', hash: 'SHA-512'}, 'key', 'data').byteLength", allocator);
+    defer result.deinit(allocator);
+
+    switch (result) {
+        .ok => |value| {
+            try std.testing.expectEqualStrings("64", value); // SHA-512 = 64 bytes
+        },
+        .err => |e| {
+            std.debug.print("Unexpected error: {s}\n", .{e.message});
+            return error.UnexpectedError;
         },
     }
 }

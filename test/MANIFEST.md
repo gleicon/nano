@@ -57,9 +57,11 @@ See `test/astro/STRATEGY.md` for full plan.
 ### Crypto APIs
 | Test | Status | File | Security |
 |------|--------|------|----------|
-| crypto.randomUUID | [ ] | phase2/crypto.js | |
-| crypto.getRandomValues | [ ] | phase2/crypto.js | sec/crypto.js |
-| crypto.subtle.digest | [ ] | phase2/crypto.js | sec/crypto.js |
+| crypto.randomUUID | [x] | phase2/crypto.js | |
+| crypto.getRandomValues | [x] | phase2/crypto.js | sec/crypto.js |
+| crypto.subtle.digest | [x] | phase2/crypto.js | sec/crypto.js |
+| crypto.subtle.sign | [x] | phase2/v2-apis.js | CRYP-04 |
+| crypto.subtle.verify | [x] | phase2/v2-apis.js | CRYP-04 |
 
 ### Fetch API
 | Test | Status | File | Security |
@@ -72,6 +74,37 @@ See `test/astro/STRATEGY.md` for full plan.
 | **SSRF prevention** | [ ] | | sec/fetch.js |
 | **No file:// access** | [ ] | | sec/fetch.js |
 | **No internal IPs** | [ ] | | sec/fetch.js |
+
+### Blob/File APIs (HTTP-06/07)
+| Test | Status | File | Security |
+|------|--------|------|----------|
+| Blob creation | [x] | phase2/v2-apis.js | |
+| Blob.size | [x] | phase2/v2-apis.js | |
+| Blob.type | [x] | phase2/v2-apis.js | |
+| File creation | [x] | phase2/v2-apis.js | |
+| File.name | [x] | phase2/v2-apis.js | |
+| File.lastModified | [x] | phase2/v2-apis.js | |
+
+### FormData API (HTTP-06)
+| Test | Status | File | Security |
+|------|--------|------|----------|
+| FormData.append | [x] | phase2/v2-apis.js | |
+| FormData.get | [x] | phase2/v2-apis.js | |
+| FormData.getAll | [x] | phase2/v2-apis.js | |
+| FormData.has | [x] | phase2/v2-apis.js | |
+| FormData.set | [x] | phase2/v2-apis.js | |
+| FormData.delete | [x] | phase2/v2-apis.js | |
+| FormData.entries | [x] | phase2/v2-apis.js | |
+| FormData.keys | [x] | phase2/v2-apis.js | |
+| FormData.values | [x] | phase2/v2-apis.js | |
+
+### AbortController API (HTTP-05)
+| Test | Status | File | Security |
+|------|--------|------|----------|
+| AbortController creation | [x] | phase2/v2-apis.js | |
+| AbortController.abort | [x] | phase2/v2-apis.js | |
+| AbortSignal.aborted | [x] | phase2/v2-apis.js | |
+| AbortSignal.reason | [x] | phase2/v2-apis.js | |
 
 ### Streams API
 | Test | Status | File | Security |
@@ -112,13 +145,13 @@ See `test/astro/STRATEGY.md` for full plan.
 
 ## Phase 5: Production Hardening
 
-### Resource Limits
+### Resource Limits (RLIM-01, RLIM-02)
 | Test | Status | File | Security |
 |------|--------|------|----------|
-| CPU timeout (50ms) | [ ] | phase5/limits.js | sec/limits.js |
-| Memory limit (128MB) | [ ] | phase5/limits.js | sec/limits.js |
-| **Infinite loop terminates** | [ ] | | sec/limits.js |
-| **Memory bomb contained** | [ ] | | sec/limits.js |
+| CPU timeout (5s default) | [x] | phase5/limits.js | sec/limits.js |
+| Memory limit (128MB) | [x] | phase5/limits.js | sec/limits.js |
+| **Infinite loop terminates** | [x] | | sec/limits.js |
+| **Memory bomb contained** | [P] | | sec/limits.js |
 
 ### Observability
 | Test | Status | File | Security |

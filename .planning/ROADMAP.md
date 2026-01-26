@@ -124,14 +124,24 @@ These items were part of original v1 scope but deferred for complexity:
 | V8 Snapshots | Callback serialization complex | CORE-03 | Deferred |
 | Isolate Pooling | Single-threaded for v1.0 | CORE-04 | Deferred |
 | Multi-App Registry | Single-app MVP sufficient | HOST-02 | Deferred |
-| CPU Watchdog (infinite loops) | V8 TerminateExecution API | RLIM-02 | **In Progress** |
-| Memory Limits | V8 ResourceConstraints API | RLIM-01 | **In Progress** |
+| CPU Watchdog (infinite loops) | V8 TerminateExecution API | RLIM-02 | **Complete** |
+| Memory Limits | V8 ResourceConstraints API | RLIM-01 | **Complete** |
 | Per-App Config | Config file format (JSON/TOML) | RLIM-03 | Deferred |
 | Multi-App Config File | Boot multiple apps from config | - | **Planned** |
 | Streams API | Complex, rarely needed for Workers | WAPI-06 | Deferred |
-| AbortController | Requires async cancellation design | HTTP-05 | Planned |
-| FormData/Blob/File | Requires binary data handling | HTTP-06, HTTP-07 | Planned |
-| crypto.subtle.sign/verify | Requires HMAC/RSA implementation | CRYP-04 | Planned |
+| AbortController | Requires async cancellation design | HTTP-05 | **Complete** |
+| FormData/Blob/File | Requires binary data handling | HTTP-06, HTTP-07 | **Complete** |
+| crypto.subtle.sign/verify | Requires HMAC/RSA implementation | CRYP-04 | **Complete** |
+
+## v2 Completed (2026-01-26)
+
+| Feature | Implementation |
+|---------|----------------|
+| RLIM-02 CPU Watchdog | Separate thread with V8 TerminateExecution (5s timeout) |
+| RLIM-01 Memory Limits | V8 ResourceConstraints (128MB default) |
+| HTTP-05 AbortController | AbortController/AbortSignal with abort(), aborted(), reason() |
+| HTTP-06/07 FormData/Blob/File | Blob with base64 storage, File extends Blob, FormData with append/get/set |
+| CRYP-04 crypto.subtle.sign/verify | HMAC-SHA256/384/512 signing and verification |
 
 ## Progress
 
