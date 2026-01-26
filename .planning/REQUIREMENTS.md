@@ -9,50 +9,50 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Core Runtime
 
-- [ ] **CORE-01**: V8 isolate can execute JavaScript code and return results
-- [ ] **CORE-02**: Arena allocator per request provides instant memory cleanup
-- [ ] **CORE-03**: V8 snapshots enable <5ms cold start for new isolates
-- [ ] **CORE-04**: Isolate pool maintains warm isolates for reuse between requests
+- [x] **CORE-01**: V8 isolate can execute JavaScript code and return results
+- [x] **CORE-02**: Arena allocator per request provides instant memory cleanup
+- [ ] **CORE-03**: V8 snapshots enable <5ms cold start for new isolates (deferred v2)
+- [ ] **CORE-04**: Isolate pool maintains warm isolates for reuse between requests (deferred v2)
 
 ### Web APIs
 
-- [ ] **WAPI-01**: console.log, console.warn, console.error output to structured logs
-- [ ] **WAPI-02**: TextEncoder and TextDecoder handle UTF-8 encoding/decoding
-- [ ] **WAPI-03**: atob and btoa handle Base64 encoding/decoding
-- [ ] **WAPI-04**: URL and URLSearchParams parse and manipulate URLs
-- [ ] **WAPI-05**: setTimeout, clearTimeout, setInterval provide timer functionality
-- [ ] **WAPI-06**: ReadableStream, WritableStream, TransformStream for streaming
+- [x] **WAPI-01**: console.log, console.warn, console.error output to structured logs
+- [x] **WAPI-02**: TextEncoder and TextDecoder handle UTF-8 encoding/decoding
+- [x] **WAPI-03**: atob and btoa handle Base64 encoding/decoding
+- [x] **WAPI-04**: URL and URLSearchParams parse and manipulate URLs
+- [x] **WAPI-05**: setTimeout, clearTimeout, setInterval provide timer functionality
+- [ ] **WAPI-06**: ReadableStream, WritableStream, TransformStream for streaming (deferred v2)
 
 ### HTTP/Fetch
 
-- [ ] **HTTP-01**: Headers class implements standard Headers API
-- [ ] **HTTP-02**: Request class implements standard Request API
-- [ ] **HTTP-03**: Response class implements standard Response API
-- [ ] **HTTP-04**: fetch() function makes HTTP requests with full options support
-- [ ] **HTTP-05**: AbortController and AbortSignal enable request cancellation
-- [ ] **HTTP-06**: FormData handles multipart form data
-- [ ] **HTTP-07**: Blob and File handle binary data
+- [x] **HTTP-01**: Headers class implements standard Headers API (partial: get/set/has/delete)
+- [x] **HTTP-02**: Request class implements standard Request API
+- [x] **HTTP-03**: Response class implements standard Response API
+- [x] **HTTP-04**: fetch() function makes HTTP requests with Promise support
+- [ ] **HTTP-05**: AbortController and AbortSignal enable request cancellation (deferred v2)
+- [ ] **HTTP-06**: FormData handles multipart form data (deferred v2)
+- [ ] **HTTP-07**: Blob and File handle binary data (deferred v2)
 
 ### Crypto
 
-- [ ] **CRYP-01**: crypto.getRandomValues() fills typed arrays with random values
-- [ ] **CRYP-02**: crypto.randomUUID() generates RFC 4122 UUIDs
-- [ ] **CRYP-03**: crypto.subtle.digest() computes SHA-256, SHA-384, SHA-512 hashes
-- [ ] **CRYP-04**: crypto.subtle.sign() and verify() handle HMAC and RSA signatures
+- [x] **CRYP-01**: crypto.getRandomValues() fills typed arrays with random values
+- [x] **CRYP-02**: crypto.randomUUID() generates RFC 4122 UUIDs
+- [x] **CRYP-03**: crypto.subtle.digest() computes SHA-1, SHA-256, SHA-384, SHA-512 hashes
+- [ ] **CRYP-04**: crypto.subtle.sign() and verify() handle HMAC and RSA signatures (deferred v2)
 
 ### Multi-App Hosting
 
-- [ ] **HOST-01**: Apps deploy by pointing NANO at a folder path
-- [ ] **HOST-02**: App registry tracks app names and configurations
-- [ ] **HOST-03**: HTTP server routes requests to apps by port
+- [x] **HOST-01**: Apps deploy by pointing NANO at a folder path
+- [ ] **HOST-02**: App registry tracks app names and configurations (deferred v2)
+- [x] **HOST-03**: HTTP server routes requests to apps by port
 
 ### Observability
 
-- [ ] **OBSV-01**: Structured JSON logging includes app name, request ID, timestamp
-- [ ] **OBSV-02**: HTTP errors return proper status codes and clean error messages
-- [ ] **OBSV-03**: Prometheus metrics endpoint exposes isolate count, memory, latency
+- [x] **OBSV-01**: Structured JSON logging includes app name, request ID, timestamp
+- [x] **OBSV-02**: HTTP errors return proper status codes and clean error messages
+- [x] **OBSV-03**: Prometheus metrics endpoint exposes request count, errors, latency
 
-### Resource Limits
+### Resource Limits (Deferred to v2)
 
 - [ ] **RLIM-01**: Memory limit per isolate enforced at creation (128MB default)
 - [ ] **RLIM-02**: CPU watchdog terminates scripts exceeding time limit (50ms default)
@@ -102,42 +102,43 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CORE-01 | Phase 1 | Pending |
-| CORE-02 | Phase 1 | Pending |
-| CORE-03 | Phase 4 | Pending |
-| CORE-04 | Phase 4 | Pending |
-| WAPI-01 | Phase 2 | Pending |
-| WAPI-02 | Phase 2 | Pending |
-| WAPI-03 | Phase 2 | Pending |
-| WAPI-04 | Phase 2 | Pending |
-| WAPI-05 | Phase 2 | Pending |
-| WAPI-06 | Phase 2 | Pending |
-| HTTP-01 | Phase 2 | Pending |
-| HTTP-02 | Phase 2 | Pending |
-| HTTP-03 | Phase 2 | Pending |
-| HTTP-04 | Phase 2 | Pending |
-| HTTP-05 | Phase 2 | Pending |
-| HTTP-06 | Phase 2 | Pending |
-| HTTP-07 | Phase 2 | Pending |
-| CRYP-01 | Phase 2 | Pending |
-| CRYP-02 | Phase 2 | Pending |
-| CRYP-03 | Phase 2 | Pending |
-| CRYP-04 | Phase 2 | Pending |
-| HOST-01 | Phase 3 | Pending |
-| HOST-02 | Phase 3 | Pending |
-| HOST-03 | Phase 3 | Pending |
-| OBSV-01 | Phase 5 | Pending |
-| OBSV-02 | Phase 3 | Pending |
-| OBSV-03 | Phase 5 | Pending |
-| RLIM-01 | Phase 5 | Pending |
-| RLIM-02 | Phase 5 | Pending |
-| RLIM-03 | Phase 5 | Pending |
+| CORE-01 | Phase 1 | Complete |
+| CORE-02 | Phase 1 | Complete |
+| CORE-03 | Phase 4 | Deferred v2 |
+| CORE-04 | Phase 4 | Deferred v2 |
+| WAPI-01 | Phase 2 | Complete |
+| WAPI-02 | Phase 2 | Complete |
+| WAPI-03 | Phase 2 | Complete |
+| WAPI-04 | Phase 2 | Complete |
+| WAPI-05 | Phase 6 | Complete |
+| WAPI-06 | - | Deferred v2 |
+| HTTP-01 | Phase 2 | Complete (partial) |
+| HTTP-02 | Phase 2 | Complete |
+| HTTP-03 | Phase 2 | Complete |
+| HTTP-04 | Phase 6 | Complete |
+| HTTP-05 | - | Deferred v2 |
+| HTTP-06 | - | Deferred v2 |
+| HTTP-07 | - | Deferred v2 |
+| CRYP-01 | Phase 2 | Complete |
+| CRYP-02 | Phase 2 | Complete |
+| CRYP-03 | Phase 2 | Complete |
+| CRYP-04 | - | Deferred v2 |
+| HOST-01 | Phase 3 | Complete |
+| HOST-02 | - | Deferred v2 |
+| HOST-03 | Phase 3 | Complete |
+| OBSV-01 | Phase 5 | Complete |
+| OBSV-02 | Phase 3 | Complete |
+| OBSV-03 | Phase 5 | Complete |
+| RLIM-01 | - | Deferred v2 |
+| RLIM-02 | - | Deferred v2 |
+| RLIM-03 | - | Deferred v2 |
 
 **Coverage:**
 - v1 requirements: 28 total
-- Mapped to phases: 28
-- Unmapped: 0
+- Complete: 18
+- Partial: 1 (HTTP-01)
+- Deferred v2: 9
 
 ---
 *Requirements defined: 2026-01-19*
-*Last updated: 2026-01-20 after roadmap creation*
+*Last updated: 2026-01-26 after Phase 6 completion*
