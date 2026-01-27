@@ -247,27 +247,43 @@ fn fetchCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void 
     const body = body_buf[0..body_len];
 
     // Make the HTTP request
-    const result = doFetch(url, method, body) catch |err| {
+    var result = doFetch(url, method, body) catch |err| {
         var err_buf: [256]u8 = undefined;
         const err_msg = std.fmt.bufPrint(&err_buf, "fetch failed: {s}", .{@errorName(err)}) catch "fetch failed";
         _ = resolver.reject(context, v8.String.initUtf8(isolate, err_msg).toValue());
         info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
         return;
     };
-    defer fetch_allocator.free(result.body);
+    defer result.deinit();
 
     // Create Response object
-    const response = createFetchResponse(isolate, context, result.status, result.body);
+    const response = createFetchResponse(isolate, context, result.status, result.body, result.headers);
 
     // Resolve the promise with the Response
     _ = resolver.resolve(context, v8.Value{ .handle = @ptrCast(response.handle) });
     info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
 }
 
+/// A single HTTP header name-value pair (owned copies)
+const HeaderEntry = struct {
+    name: []u8,
+    value: []u8,
+};
+
 /// Result of HTTP fetch operation
 const FetchResult = struct {
     status: u16,
     body: []u8,
+    headers: []HeaderEntry,
+
+    pub fn deinit(self: *FetchResult) void {
+        fetch_allocator.free(self.body);
+        for (self.headers) |header| {
+            fetch_allocator.free(header.name);
+            fetch_allocator.free(header.value);
+        }
+        fetch_allocator.free(self.headers);
+    }
 };
 
 /// Perform the actual HTTP request using lower-level API for body reading
@@ -325,6 +341,33 @@ fn doFetch(url: []const u8, method: []const u8, body: []const u8) !FetchResult {
     // Receive response head
     var response = req.receiveHead(&redirect_buffer) catch return error.ResponseFailed;
 
+    // Extract response headers
+    var header_list: std.ArrayListUnmanaged(HeaderEntry) = .empty;
+    errdefer {
+        for (header_list.items) |h| {
+            fetch_allocator.free(h.name);
+            fetch_allocator.free(h.value);
+        }
+        header_list.deinit(fetch_allocator);
+    }
+
+    var header_iter = response.head.iterateHeaders();
+    while (header_iter.next()) |h| {
+        // Allocate and copy header name and value
+        const name_copy = fetch_allocator.dupe(u8, h.name) catch continue;
+        errdefer fetch_allocator.free(name_copy);
+        const value_copy = fetch_allocator.dupe(u8, h.value) catch {
+            fetch_allocator.free(name_copy);
+            continue;
+        };
+
+        header_list.append(fetch_allocator, .{ .name = name_copy, .value = value_copy }) catch {
+            fetch_allocator.free(name_copy);
+            fetch_allocator.free(value_copy);
+            continue;
+        };
+    }
+
     // Read response body
     var transfer_buffer: [8192]u8 = undefined;
     const reader = response.reader(&transfer_buffer);
@@ -335,20 +378,38 @@ fn doFetch(url: []const u8, method: []const u8, body: []const u8) !FetchResult {
     return FetchResult{
         .status = @intFromEnum(response.head.status),
         .body = response_body,
+        .headers = header_list.toOwnedSlice(fetch_allocator) catch return error.ReadFailed,
     };
 }
 
 /// Create a Response object from fetch result
-fn createFetchResponse(isolate: v8.Isolate, context: v8.Context, status: u16, body: []const u8) v8.Object {
+fn createFetchResponse(isolate: v8.Isolate, context: v8.Context, status: u16, body: []const u8, headers: []const HeaderEntry) v8.Object {
     const global = context.getGlobal();
     const response_ctor_val = global.getValue(context, v8.String.initUtf8(isolate, "Response")) catch {
         return isolate.initObjectTemplateDefault().initInstance(context);
     };
     const response_ctor = v8.Function{ .handle = @ptrCast(response_ctor_val.handle) };
 
+    // Create headers object
+    const hdrs = isolate.initObjectTemplateDefault().initInstance(context);
+    for (headers) |header| {
+        // Convert header name to lowercase for case-insensitive storage
+        var lower_name: [256]u8 = undefined;
+        const name_len = @min(header.name.len, 255);
+        for (header.name[0..name_len], 0..) |c, i| {
+            lower_name[i] = std.ascii.toLower(c);
+        }
+        _ = hdrs.setValue(
+            context,
+            v8.String.initUtf8(isolate, lower_name[0..name_len]),
+            v8.String.initUtf8(isolate, header.value).toValue(),
+        );
+    }
+
     // Create options object
     const opts = isolate.initObjectTemplateDefault().initInstance(context);
     _ = opts.setValue(context, v8.String.initUtf8(isolate, "status"), v8.Number.init(isolate, @floatFromInt(status)).toValue());
+    _ = opts.setValue(context, v8.String.initUtf8(isolate, "headers"), hdrs);
 
     // Create Response
     const body_v8 = v8.String.initUtf8(isolate, body).toValue();

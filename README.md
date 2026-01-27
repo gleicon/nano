@@ -96,8 +96,8 @@ Run it:
 | `URL` | Full | URL parsing and manipulation |
 | `URLSearchParams` | Full | Query string handling |
 | `TextEncoder` | Full | UTF-8 encoding |
-| `TextDecoder` | Partial | UTF-8 only, string input only |
-| `Headers` | Partial | Basic get/set/has/delete |
+| `TextDecoder` | Full | UTF-8 encoding, accepts string/ArrayBuffer/TypedArray |
+| `Headers` | Full | get/set/has/delete/entries/keys/values |
 | `Request` | Full | HTTP request representation |
 | `Response` | Full | HTTP response with static methods |
 | `crypto.randomUUID()` | Full | UUID v4 generation |
@@ -189,20 +189,17 @@ nano                   Start REPL
 
 - WebSocket API
 - Streams API (ReadableStream, WritableStream)
-- FormData / multipart parsing
 - Service Worker lifecycle events
 - KV/Durable Objects (Cloudflare-specific)
 
 ### Partial Implementations
 
-- **TextDecoder**: Only accepts string input, not ArrayBuffer/TypedArray
-- **Headers.entries()**: Returns object, not iterator
-- **fetch() response headers**: Not extracted from HTTP response
-- **Crypto**: Only SHA-1/256/384/512 digests, no AES/ECDH
+- **Headers.entries()**: Returns array, not iterator (works with for-of loops)
+- **Crypto**: SHA-1/256/384/512 digests and HMAC sign/verify; no AES/ECDH
 
 ### Behavior Differences
 
-- `request.url()` and `request.method()` are methods, not properties
+- `request.url()` and `request.method()` are methods, not properties (Workers uses properties)
 - Promise timeout is iteration-based, not time-based
 
 ## Metrics

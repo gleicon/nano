@@ -229,10 +229,47 @@ fn textDecoderDecode(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) v
 
     const arg = info.getArg(0);
 
-    // TypedArray/ArrayBuffer decoding not yet supported (V8-zig backing store access limitation)
-    // Use string input or atob() for base64 decoding
-    if (arg.isArrayBufferView() or arg.isArrayBuffer()) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "TextDecoder.decode() requires string input in NANO v1.0").toValue());
+    // Handle ArrayBuffer input
+    if (arg.isArrayBuffer()) {
+        const ab = v8.ArrayBuffer{ .handle = @ptrCast(arg.handle) };
+        const ab_len = ab.getByteLength();
+        if (ab_len == 0) {
+            info.getReturnValue().set(v8.String.initUtf8(isolate, "").toValue());
+            return;
+        }
+        const shared_ptr = ab.getBackingStore();
+        const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+        const data = backing_store.getData();
+        if (data) |ptr| {
+            const byte_ptr: [*]const u8 = @ptrCast(ptr);
+            const result = v8.String.initUtf8(isolate, byte_ptr[0..ab_len]);
+            info.getReturnValue().set(result.toValue());
+            return;
+        }
+        info.getReturnValue().set(v8.String.initUtf8(isolate, "").toValue());
+        return;
+    }
+
+    // Handle TypedArray (ArrayBufferView) input - e.g., Uint8Array
+    if (arg.isArrayBufferView()) {
+        const view = v8.ArrayBufferView{ .handle = @ptrCast(arg.handle) };
+        const ab = view.getBuffer();
+        const byte_len = view.getByteLength();
+        const byte_offset = view.getByteOffset();
+        if (byte_len == 0) {
+            info.getReturnValue().set(v8.String.initUtf8(isolate, "").toValue());
+            return;
+        }
+        const shared_ptr = ab.getBackingStore();
+        const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+        const data = backing_store.getData();
+        if (data) |ptr| {
+            const byte_ptr: [*]const u8 = @ptrCast(ptr);
+            const result = v8.String.initUtf8(isolate, byte_ptr[byte_offset .. byte_offset + byte_len]);
+            info.getReturnValue().set(result.toValue());
+            return;
+        }
+        info.getReturnValue().set(v8.String.initUtf8(isolate, "").toValue());
         return;
     }
 
@@ -246,5 +283,5 @@ fn textDecoderDecode(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) v
         return;
     }
 
-    _ = isolate.throwException(v8.String.initUtf8(isolate, "decode: expected string input").toValue());
+    _ = isolate.throwException(v8.String.initUtf8(isolate, "decode: expected ArrayBuffer, TypedArray, or string").toValue());
 }
