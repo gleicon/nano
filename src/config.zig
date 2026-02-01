@@ -4,7 +4,8 @@ const std = @import("std");
 pub const AppConfig = struct {
     name: []const u8,
     path: []const u8,
-    port: u16,
+    hostname: []const u8, // Host header value for routing (e.g., "app-a.local")
+    port: u16, // Kept for backwards compatibility, ignored in multi-app mode
     timeout_ms: u64,
     memory_mb: usize,
 };
@@ -20,11 +21,13 @@ pub const Config = struct {
     apps: []AppConfig,
     defaults: Defaults,
     allocator: std.mem.Allocator,
+    port: u16, // Global port for virtual host mode (all apps share this port)
 
     pub fn deinit(self: *Config) void {
         for (self.apps) |app| {
             self.allocator.free(app.name);
             self.allocator.free(app.path);
+            self.allocator.free(app.hostname);
         }
         self.allocator.free(self.apps);
     }
@@ -63,6 +66,14 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
     defer parsed.deinit();
 
     const root = parsed.value;
+
+    // Parse global port (default 8080)
+    var global_port: u16 = 8080;
+    if (root.object.get("port")) |port_val| {
+        if (port_val == .integer) {
+            global_port = @intCast(port_val.integer);
+        }
+    }
 
     // Parse defaults
     var defaults = Defaults{};
@@ -104,9 +115,8 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
         // Required fields
         const name_val = app_obj.get("name") orelse continue;
         const path_val = app_obj.get("path") orelse continue;
-        const port_val = app_obj.get("port") orelse continue;
 
-        if (name_val != .string or path_val != .string or port_val != .integer) {
+        if (name_val != .string or path_val != .string) {
             continue;
         }
 
@@ -119,6 +129,28 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
             allocator.free(name);
             return ParseError.OutOfMemory;
         };
+        errdefer allocator.free(path);
+
+        // Hostname for routing (defaults to app name if not specified)
+        const hostname_val = app_obj.get("hostname");
+        const hostname = if (hostname_val) |hv|
+            if (hv == .string) allocator.dupe(u8, hv.string) catch {
+                return ParseError.OutOfMemory;
+            } else allocator.dupe(u8, name_val.string) catch {
+                return ParseError.OutOfMemory;
+            }
+        else
+            allocator.dupe(u8, name_val.string) catch {
+                return ParseError.OutOfMemory;
+            };
+
+        // Per-app port (optional, for backwards compatibility)
+        var app_port = global_port;
+        if (app_obj.get("port")) |port_val| {
+            if (port_val == .integer) {
+                app_port = @intCast(port_val.integer);
+            }
+        }
 
         // Optional fields with defaults
         var timeout_ms = defaults.timeout_ms;
@@ -138,7 +170,8 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
         apps[i] = AppConfig{
             .name = name,
             .path = path,
-            .port = @intCast(port_val.integer),
+            .hostname = hostname,
+            .port = app_port,
             .timeout_ms = timeout_ms,
             .memory_mb = memory_mb,
         };
@@ -154,6 +187,7 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
         .apps = apps[0..i],
         .defaults = defaults,
         .allocator = allocator,
+        .port = global_port,
     };
 }
 
@@ -162,11 +196,12 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
 test "parse valid config" {
     const json =
         \\{
+        \\  "port": 8080,
         \\  "apps": [
         \\    {
         \\      "name": "test-app",
         \\      "path": "./test/app",
-        \\      "port": 8080,
+        \\      "hostname": "test.local",
         \\      "timeout_ms": 3000,
         \\      "memory_mb": 64
         \\    }
@@ -178,15 +213,16 @@ test "parse valid config" {
         \\}
     ;
 
-    var config = try parseConfig(std.testing.allocator, json);
-    defer config.deinit();
+    var cfg = try parseConfig(std.testing.allocator, json);
+    defer cfg.deinit();
 
-    try std.testing.expectEqual(@as(usize, 1), config.apps.len);
-    try std.testing.expectEqualStrings("test-app", config.apps[0].name);
-    try std.testing.expectEqualStrings("./test/app", config.apps[0].path);
-    try std.testing.expectEqual(@as(u16, 8080), config.apps[0].port);
-    try std.testing.expectEqual(@as(u64, 3000), config.apps[0].timeout_ms);
-    try std.testing.expectEqual(@as(usize, 64), config.apps[0].memory_mb);
+    try std.testing.expectEqual(@as(usize, 1), cfg.apps.len);
+    try std.testing.expectEqual(@as(u16, 8080), cfg.port);
+    try std.testing.expectEqualStrings("test-app", cfg.apps[0].name);
+    try std.testing.expectEqualStrings("./test/app", cfg.apps[0].path);
+    try std.testing.expectEqualStrings("test.local", cfg.apps[0].hostname);
+    try std.testing.expectEqual(@as(u64, 3000), cfg.apps[0].timeout_ms);
+    try std.testing.expectEqual(@as(usize, 64), cfg.apps[0].memory_mb);
 }
 
 test "parse config with defaults" {
@@ -195,8 +231,7 @@ test "parse config with defaults" {
         \\  "apps": [
         \\    {
         \\      "name": "app-with-defaults",
-        \\      "path": "./app",
-        \\      "port": 9000
+        \\      "path": "./app"
         \\    }
         \\  ],
         \\  "defaults": {
@@ -206,33 +241,37 @@ test "parse config with defaults" {
         \\}
     ;
 
-    var config = try parseConfig(std.testing.allocator, json);
-    defer config.deinit();
+    var cfg = try parseConfig(std.testing.allocator, json);
+    defer cfg.deinit();
 
-    try std.testing.expectEqual(@as(usize, 1), config.apps.len);
+    try std.testing.expectEqual(@as(usize, 1), cfg.apps.len);
+    // Hostname defaults to name when not specified
+    try std.testing.expectEqualStrings("app-with-defaults", cfg.apps[0].hostname);
     // App should use defaults
-    try std.testing.expectEqual(@as(u64, 10000), config.apps[0].timeout_ms);
-    try std.testing.expectEqual(@as(usize, 256), config.apps[0].memory_mb);
+    try std.testing.expectEqual(@as(u64, 10000), cfg.apps[0].timeout_ms);
+    try std.testing.expectEqual(@as(usize, 256), cfg.apps[0].memory_mb);
 }
 
 test "parse multiple apps" {
     const json =
         \\{
+        \\  "port": 8080,
         \\  "apps": [
-        \\    {"name": "app-a", "path": "./a", "port": 8081},
-        \\    {"name": "app-b", "path": "./b", "port": 8082}
+        \\    {"name": "app-a", "path": "./a", "hostname": "a.local"},
+        \\    {"name": "app-b", "path": "./b", "hostname": "b.local"}
         \\  ]
         \\}
     ;
 
-    var config = try parseConfig(std.testing.allocator, json);
-    defer config.deinit();
+    var cfg = try parseConfig(std.testing.allocator, json);
+    defer cfg.deinit();
 
-    try std.testing.expectEqual(@as(usize, 2), config.apps.len);
-    try std.testing.expectEqualStrings("app-a", config.apps[0].name);
-    try std.testing.expectEqual(@as(u16, 8081), config.apps[0].port);
-    try std.testing.expectEqualStrings("app-b", config.apps[1].name);
-    try std.testing.expectEqual(@as(u16, 8082), config.apps[1].port);
+    try std.testing.expectEqual(@as(usize, 2), cfg.apps.len);
+    try std.testing.expectEqual(@as(u16, 8080), cfg.port);
+    try std.testing.expectEqualStrings("app-a", cfg.apps[0].name);
+    try std.testing.expectEqualStrings("a.local", cfg.apps[0].hostname);
+    try std.testing.expectEqualStrings("app-b", cfg.apps[1].name);
+    try std.testing.expectEqualStrings("b.local", cfg.apps[1].hostname);
 }
 
 test "parse invalid json returns error" {

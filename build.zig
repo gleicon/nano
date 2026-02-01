@@ -244,6 +244,7 @@ pub fn build(b: *std.Build) void {
     server_module.addImport("metrics", metrics_module);
     server_module.addImport("event_loop", event_loop_module);
     server_module.addImport("timers", timers_module);
+    server_module.addImport("config", config_module);
 
     // Create the root module for nano
     const root_module = b.createModule(.{

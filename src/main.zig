@@ -132,38 +132,32 @@ fn serveMultiApp(config_path: []const u8, stderr: std.fs.File) !void {
     };
     defer cfg.deinit();
 
-    stdout.writeAll("NANO Multi-App Mode\n") catch {};
-    stdout.writeAll("===================\n\n") catch {};
+    stdout.writeAll("NANO Multi-App Mode (Virtual Host)\n") catch {};
+    stdout.writeAll("===================================\n\n") catch {};
 
     // Print loaded apps
     var buf: [256]u8 = undefined;
-    const app_count = std.fmt.bufPrint(&buf, "Loaded {d} app(s) from config:\n\n", .{cfg.apps.len}) catch "Apps loaded\n";
+    const app_count = std.fmt.bufPrint(&buf, "Loading {d} app(s) on port {d}:\n\n", .{ cfg.apps.len, cfg.port }) catch "Apps loaded\n";
     stdout.writeAll(app_count) catch {};
 
     for (cfg.apps) |app| {
-        const line = std.fmt.bufPrint(&buf, "  [{s}] port:{d} timeout:{d}ms memory:{d}MB\n    path: {s}\n\n", .{
+        const line = std.fmt.bufPrint(&buf, "  [{s}] Host: {s}\n    path: {s}, timeout:{d}ms, memory:{d}MB\n\n", .{
             app.name,
-            app.port,
+            app.hostname,
+            app.path,
             app.timeout_ms,
             app.memory_mb,
-            app.path,
         }) catch continue;
         stdout.writeAll(line) catch {};
     }
 
-    // For MVP, start only the first app (multi-threaded server is future work)
-    if (cfg.apps.len > 0) {
-        const first_app = cfg.apps[0];
-        const starting = std.fmt.bufPrint(&buf, "Starting [{s}] on port {d}...\n", .{ first_app.name, first_app.port }) catch "Starting...\n";
-        stdout.writeAll(starting) catch {};
-
-        // TODO: For full multi-app, spawn threads for each app
-        // For now, serve the first app with its configured settings
-        try server.serveWithConfig(first_app.port, first_app.path, first_app.timeout_ms, first_app.memory_mb);
-    } else {
+    if (cfg.apps.len == 0) {
         stderr.writeAll("No apps defined in config\n") catch {};
         return error.NoApps;
     }
+
+    // Start multi-app server with virtual host routing
+    try server.serveMultiApp(cfg);
 }
 
 fn evalCommand(script_source: []const u8, stdout: std.fs.File, stderr: std.fs.File) !void {

@@ -6,6 +6,7 @@ const log = @import("log");
 const metrics_mod = @import("metrics");
 const EventLoop = @import("event_loop").EventLoop;
 const timers = @import("timers");
+const config_mod = @import("config");
 
 // Get the actual type from the function return type
 const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
@@ -14,7 +15,12 @@ pub const HttpServer = struct {
     address: std.net.Address,
     server: std.net.Server,
     running: bool,
+    // Single app mode (backwards compatible)
     app: ?app_module.App,
+    // Multi-app mode: hostname -> App
+    apps: std.StringHashMap(*app_module.App),
+    app_storage: std.ArrayList(app_module.App), // Owns the App memory
+    default_app: ?*app_module.App,
     allocator: std.mem.Allocator,
     platform: v8.Platform,
     array_buffer_allocator: ArrayBufferAllocator,
@@ -43,7 +49,10 @@ pub const HttpServer = struct {
             .address = address,
             .server = tcp_server,
             .running = true,
-            .app = null, // App loaded separately after event loop pointer is stable
+            .app = null, // Single app mode (backwards compatible)
+            .apps = std.StringHashMap(*app_module.App).init(allocator), // Multi-app mode
+            .app_storage = .empty,
+            .default_app = null,
             .allocator = allocator,
             .platform = platform,
             .array_buffer_allocator = array_buffer_allocator,
@@ -69,10 +78,70 @@ pub const HttpServer = struct {
         }
     }
 
+    /// Load multiple apps from config (virtual host mode)
+    pub fn loadApps(self: *HttpServer, cfg: config_mod.Config) !void {
+        // Set global event loop reference BEFORE loading apps
+        timers.setEventLoop(&self.event_loop);
+
+        var logger = log.stdout();
+
+        for (cfg.apps) |app_cfg| {
+            // Load the app
+            var loaded_app = app_module.loadApp(self.allocator, app_cfg.path, self.array_buffer_allocator) catch |err| {
+                logError("Failed to load app", app_cfg.name, err);
+                continue; // Skip failed apps, continue loading others
+            };
+
+            // Apply config settings
+            loaded_app.timeout_ms = app_cfg.timeout_ms;
+            loaded_app.memory_limit_mb = app_cfg.memory_mb;
+            loaded_app.event_loop = &self.event_loop;
+
+            // Store the app
+            try self.app_storage.append(self.allocator, loaded_app);
+            const app_ptr = &self.app_storage.items[self.app_storage.items.len - 1];
+
+            // Register hostname -> app mapping
+            // Need to dupe the hostname since cfg will be freed
+            const hostname_key = try self.allocator.dupe(u8, app_cfg.hostname);
+            try self.apps.put(hostname_key, app_ptr);
+
+            // First app becomes default
+            if (self.default_app == null) {
+                self.default_app = app_ptr;
+            }
+
+            logger.info("app_loaded", .{
+                .name = app_cfg.name,
+                .hostname = app_cfg.hostname,
+                .path = app_cfg.path,
+            });
+        }
+
+        logger.info("multi_app_ready", .{
+            .app_count = self.app_storage.items.len,
+            .port = self.address.getPort(),
+        });
+    }
+
     pub fn deinit(self: *HttpServer) void {
+        // Clean up single app mode
         if (self.app) |*a| {
             a.deinit();
         }
+
+        // Clean up multi-app mode
+        // Free hostname keys
+        var key_iter = self.apps.keyIterator();
+        while (key_iter.next()) |key| {
+            self.allocator.free(key.*);
+        }
+        self.apps.deinit();
+        for (self.app_storage.items) |*stored_app| {
+            stored_app.deinit();
+        }
+        self.app_storage.deinit(self.allocator);
+
         self.server.deinit();
         self.event_loop.deinit();
 
@@ -175,6 +244,30 @@ pub const HttpServer = struct {
             return;
         }
 
+        // Extract Host header for multi-app routing
+        const host = extractHostHeader(request_data);
+
+        // Find the app to handle this request
+        // Priority: multi-app by hostname > single app > default app > no app
+        var target_app: ?*app_module.App = null;
+
+        if (host) |hostname| {
+            // Try multi-app lookup by hostname
+            if (self.apps.get(hostname)) |app_ptr| {
+                target_app = app_ptr;
+            }
+        }
+
+        // Fall back to single app mode
+        if (target_app == null and self.app != null) {
+            target_app = &self.app.?;
+        }
+
+        // Fall back to default app in multi-app mode
+        if (target_app == null) {
+            target_app = self.default_app;
+        }
+
         // Handle app request
         var status: u16 = 200;
         var response_body: []const u8 = "Hello from NANO!\n";
@@ -182,7 +275,7 @@ pub const HttpServer = struct {
         var should_free_body = false;
         var should_free_ct = false;
 
-        if (self.app) |*a| {
+        if (target_app) |a| {
             const result = app_module.handleRequest(a, method, path, body, self.allocator);
             status = result.status;
             response_body = result.body;
@@ -192,6 +285,11 @@ pub const HttpServer = struct {
 
             // Process event loop for timers scheduled during request handling
             self.processEventLoop(a);
+        } else if (self.apps.count() > 0) {
+            // Multi-app mode but no matching host - return 404
+            status = 404;
+            response_body = "{\"error\":\"No app configured for this host\"}";
+            content_type = "application/json";
         }
 
         defer {
@@ -292,6 +390,36 @@ pub const HttpServer = struct {
     }
 };
 
+/// Extract Host header from HTTP request, stripping port if present
+fn extractHostHeader(request_data: []const u8) ?[]const u8 {
+    // Find headers section (after first \r\n)
+    const headers_start = (std.mem.indexOf(u8, request_data, "\r\n") orelse return null) + 2;
+    const headers_end = std.mem.indexOf(u8, request_data, "\r\n\r\n") orelse request_data.len;
+    const headers = request_data[headers_start..headers_end];
+
+    // Search for Host header (case-insensitive)
+    var lines = std.mem.splitSequence(u8, headers, "\r\n");
+    while (lines.next()) |line| {
+        // Check if line starts with "Host:" (case-insensitive)
+        if (line.len >= 5) {
+            const prefix = line[0..5];
+            if (std.ascii.eqlIgnoreCase(prefix, "host:")) {
+                // Extract value, trim whitespace
+                var value = line[5..];
+                while (value.len > 0 and value[0] == ' ') {
+                    value = value[1..];
+                }
+                // Strip port if present (e.g., "example.com:8080" -> "example.com")
+                if (std.mem.indexOf(u8, value, ":")) |colon_pos| {
+                    return value[0..colon_pos];
+                }
+                return value;
+            }
+        }
+    }
+    return null;
+}
+
 fn logRequest(request_id: u64, method: []const u8, path: []const u8, status: u16, bytes: usize, latency_ms: f64) void {
     var logger = log.stdout();
     logger.info("request", .{
@@ -355,15 +483,15 @@ pub fn serve(port: u16, app_path: ?[]const u8) !void {
 
 /// Start HTTP server with full configuration options
 pub fn serveWithConfig(port: u16, app_path: ?[]const u8, timeout_ms: ?u64, memory_mb: ?usize) !void {
-    var server = try HttpServer.init(port, std.heap.page_allocator);
-    defer server.deinit();
+    var http_server = try HttpServer.init(port, std.heap.page_allocator);
+    defer http_server.deinit();
 
     // Load app after server init (event loop pointer is now stable)
     if (app_path) |path| {
-        try server.loadApp(path);
+        try http_server.loadApp(path);
 
         // Apply config settings to the loaded app
-        if (server.app) |*app| {
+        if (http_server.app) |*app| {
             if (timeout_ms) |t| {
                 app.timeout_ms = t;
             }
@@ -374,7 +502,7 @@ pub fn serveWithConfig(port: u16, app_path: ?[]const u8, timeout_ms: ?u64, memor
     }
 
     // Install signal handlers for graceful shutdown
-    global_server = &server;
+    global_server = &http_server;
     const sigterm_action = posix.Sigaction{
         .handler = .{ .handler = handleSignal },
         .mask = std.posix.sigemptyset(),
@@ -383,5 +511,26 @@ pub fn serveWithConfig(port: u16, app_path: ?[]const u8, timeout_ms: ?u64, memor
     _ = posix.sigaction(posix.SIG.TERM, &sigterm_action, null);
     _ = posix.sigaction(posix.SIG.INT, &sigterm_action, null);
 
-    try server.run();
+    try http_server.run();
+}
+
+/// Start HTTP server in multi-app mode with virtual host routing
+pub fn serveMultiApp(cfg: config_mod.Config) !void {
+    var http_server = try HttpServer.init(cfg.port, std.heap.page_allocator);
+    defer http_server.deinit();
+
+    // Load all apps from config
+    try http_server.loadApps(cfg);
+
+    // Install signal handlers for graceful shutdown
+    global_server = &http_server;
+    const sigterm_action = posix.Sigaction{
+        .handler = .{ .handler = handleSignal },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    _ = posix.sigaction(posix.SIG.TERM, &sigterm_action, null);
+    _ = posix.sigaction(posix.SIG.INT, &sigterm_action, null);
+
+    try http_server.run();
 }

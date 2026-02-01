@@ -45,7 +45,11 @@ pub const App = struct {
     memory_limit_mb: usize = DEFAULT_MEMORY_LIMIT_MB,
 
     pub fn deinit(self: *App) void {
-        // Clean up persistent handles first
+        // Enter isolate to clean up persistent handles
+        var isolate = self.isolate;
+        isolate.enter();
+
+        // Clean up persistent handles
         if (self.initialized) {
             var ctx_handle = self.persistent_context;
             ctx_handle.deinit();
@@ -54,9 +58,10 @@ pub const App = struct {
             var fetch_handle = self.persistent_fetch;
             fetch_handle.deinit();
         }
-        // Clean up V8 in reverse order
-        self.isolate.exit();
-        self.isolate.deinit();
+
+        // Exit and destroy isolate
+        isolate.exit();
+        isolate.deinit();
         self.allocator.free(self.script_source);
         self.allocator.free(self.app_path);
     }
@@ -323,8 +328,11 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
     const persistent_exports = isolate.initPersistent(v8.Value, exports);
     const persistent_fetch = isolate.initPersistent(v8.Value, fetch_val);
 
-    // Don't exit context here - leave it entered for request handling
-    // handle_scope will be destroyed but persistent handles survive
+    // Exit context and isolate after initialization
+    // handleRequest will enter them again for each request (required for multi-app mode)
+    context.exit();
+    handle_scope.deinit();
+    isolate.exit();
 
     return App{
         .allocator = allocator,
@@ -367,7 +375,11 @@ pub fn handleRequest(
         };
     }
 
-    const isolate = app.isolate;
+    var isolate = app.isolate;
+
+    // Enter isolate for this request (required for multi-app mode)
+    isolate.enter();
+    defer isolate.exit();
 
     // Create handle scope for this request
     var handle_scope: v8.HandleScope = undefined;
