@@ -1,0 +1,23 @@
+{
+  "port": 8080,
+  "apps": [
+    {
+      "name": "app-a",
+      "hostname": "a.local",
+      "path": "./test/multi-app/app-a",
+      "timeout_ms": 5000,
+      "memory_mb": 64
+    },
+    {
+      "name": "app-b",
+      "hostname": "b.local",
+      "path": "./test/multi-app/app-b",
+      "timeout_ms": 5000,
+      "memory_mb": 64
+    }
+  ],
+  "defaults": {
+    "timeout_ms": 5000,
+    "memory_mb": 128
+  }
+}
