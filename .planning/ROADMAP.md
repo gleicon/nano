@@ -55,10 +55,10 @@
 
 | Phase | Name | Status | Plans |
 |-------|------|--------|-------|
-| 1 | Multi-App Server | ○ Pending | 0/? |
+| 1 | Multi-App Server | ✓ Complete | 1/1 |
 | 2 | App Lifecycle | ○ Pending | 0/? |
 
-Progress: ░░░░░░░░░░ 0%
+Progress: █████░░░░░ 50%
 
 ---
 
@@ -66,8 +66,8 @@ Progress: ░░░░░░░░░░ 0%
 
 | REQ-ID | Requirement | Phase | Status |
 |--------|-------------|-------|--------|
-| MULTI-01 | Load multiple apps from config | 1 | Pending |
-| MULTI-02 | Route by Host header on single port | 1 | Pending |
+| MULTI-01 | Load multiple apps from config | 1 | Complete |
+| MULTI-02 | Route by Host header on single port | 1 | Complete |
 | MULTI-03 | Hot reload apps without restart | 2 | Pending |
 
 ---
