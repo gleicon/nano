@@ -32,6 +32,8 @@ pub const HttpServer = struct {
     // Config file watching for hot reload
     config_path: ?[]const u8,
     config_watcher: ?ConfigWatcher,
+    // Admin API
+    admin_enabled: bool,
 
     pub fn init(port: u16, allocator: std.mem.Allocator) !HttpServer {
         const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
@@ -66,6 +68,7 @@ pub const HttpServer = struct {
             .event_loop = event_loop,
             .config_path = null,
             .config_watcher = null,
+            .admin_enabled = true,
         };
     }
 
@@ -419,6 +422,16 @@ pub const HttpServer = struct {
             body = request_data[body_start + 4 ..];
         }
 
+        // Handle admin endpoints before app routing
+        if (self.admin_enabled and std.mem.startsWith(u8, path, "/admin/")) {
+            const admin_result = self.handleAdminRequest(conn, method, path, body);
+            // Log and return
+            const latency_ns: u64 = @intCast(std.time.nanoTimestamp() - start_time);
+            self.metrics.recordRequest(latency_ns, admin_result.status >= 400);
+            logRequest(request_id, method, path, admin_result.status, admin_result.body_len, @as(f64, @floatFromInt(latency_ns)) / 1_000_000.0);
+            return;
+        }
+
         // Handle built-in endpoints first
         if (std.mem.eql(u8, path, "/health") or std.mem.eql(u8, path, "/healthz")) {
             const health_response = "{\"status\":\"ok\"}";
@@ -582,6 +595,87 @@ pub const HttpServer = struct {
 
         // Clean up inactive timers
         self.event_loop.cleanup();
+    }
+
+    // Admin API result type
+    const AdminResult = struct {
+        status: u16,
+        body_len: usize,
+    };
+
+    /// Handle admin API requests
+    fn handleAdminRequest(self: *HttpServer, conn: std.net.Server.Connection, method: []const u8, path: []const u8, body: []const u8) AdminResult {
+        // /admin/apps endpoint
+        if (std.mem.eql(u8, path, "/admin/apps")) {
+            if (std.mem.eql(u8, method, "GET")) {
+                return self.handleListApps(conn);
+            } else if (std.mem.eql(u8, method, "POST")) {
+                return self.handleAddApp(conn, body);
+            } else if (std.mem.eql(u8, method, "DELETE")) {
+                return self.handleRemoveApp(conn, path, body);
+            }
+            return self.sendAdminResponse(conn, 405, "{\"error\":\"Method not allowed\"}");
+        }
+
+        // DELETE /admin/apps?hostname=X - path contains query string
+        if (std.mem.startsWith(u8, path, "/admin/apps?")) {
+            if (std.mem.eql(u8, method, "DELETE")) {
+                return self.handleRemoveApp(conn, path, body);
+            }
+            return self.sendAdminResponse(conn, 405, "{\"error\":\"Method not allowed\"}");
+        }
+
+        // /admin/reload endpoint
+        if (std.mem.eql(u8, path, "/admin/reload")) {
+            if (std.mem.eql(u8, method, "POST")) {
+                return self.handleReloadConfig(conn);
+            }
+            return self.sendAdminResponse(conn, 405, "{\"error\":\"Method not allowed\"}");
+        }
+
+        // /admin/health endpoint
+        if (std.mem.eql(u8, path, "/admin/health")) {
+            return self.sendAdminResponse(conn, 200, "{\"status\":\"ok\",\"admin\":true}");
+        }
+
+        return self.sendAdminResponse(conn, 404, "{\"error\":\"Not found\"}");
+    }
+
+    /// Send admin JSON response
+    fn sendAdminResponse(self: *HttpServer, conn: std.net.Server.Connection, status: u16, body: []const u8) AdminResult {
+        self.sendResponse(conn, status, "application/json", body) catch {};
+        return .{ .status = status, .body_len = body.len };
+    }
+
+    /// Stub for handleListApps - will be implemented in Task 2
+    fn handleListApps(self: *HttpServer, conn: std.net.Server.Connection) AdminResult {
+        _ = self;
+        _ = conn;
+        return .{ .status = 501, .body_len = 0 };
+    }
+
+    /// Stub for handleAddApp - will be implemented in Task 3
+    fn handleAddApp(self: *HttpServer, conn: std.net.Server.Connection, body: []const u8) AdminResult {
+        _ = self;
+        _ = conn;
+        _ = body;
+        return .{ .status = 501, .body_len = 0 };
+    }
+
+    /// Stub for handleRemoveApp - will be implemented in Task 3
+    fn handleRemoveApp(self: *HttpServer, conn: std.net.Server.Connection, path: []const u8, body: []const u8) AdminResult {
+        _ = self;
+        _ = conn;
+        _ = path;
+        _ = body;
+        return .{ .status = 501, .body_len = 0 };
+    }
+
+    /// Stub for handleReloadConfig - will be implemented in Task 3
+    fn handleReloadConfig(self: *HttpServer, conn: std.net.Server.Connection) AdminResult {
+        _ = self;
+        _ = conn;
+        return .{ .status = 501, .body_len = 0 };
     }
 };
 
