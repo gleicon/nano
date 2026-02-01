@@ -53,8 +53,8 @@
 - No request drops during reload
 
 **Plans:** 2 plans
-- [ ] 02-01-PLAN.md - Config file watcher and reload infrastructure
-- [ ] 02-02-PLAN.md - Admin API endpoints for app management
+- [x] 02-01-PLAN.md - Config file watcher and reload infrastructure
+- [x] 02-02-PLAN.md - Admin API endpoints for app management
 
 ---
 
@@ -63,9 +63,9 @@
 | Phase | Name | Status | Plans |
 |-------|------|--------|-------|
 | 1 | Multi-App Server | Complete | 1/1 |
-| 2 | App Lifecycle | In Progress | 0/2 |
+| 2 | App Lifecycle | Complete | 2/2 |
 
-Progress: █████░░░░░ 50%
+Progress: ██████████ 100%
 
 ---
 
@@ -75,7 +75,7 @@ Progress: █████░░░░░ 50%
 |--------|-------------|-------|--------|
 | MULTI-01 | Load multiple apps from config | 1 | Complete |
 | MULTI-02 | Route by Host header on single port | 1 | Complete |
-| MULTI-03 | Hot reload apps without restart | 2 | Pending |
+| MULTI-03 | Hot reload apps without restart | 2 | Complete |
 
 ---
 
