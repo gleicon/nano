@@ -8,40 +8,36 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 **Skip the container fleet entirely.** One NANO process replaces dozens of Node containers, their image builds, fleet management, and routing infrastructure — while maintaining isolation between apps.
 
-## Current Milestone: v1.1 Multi-App Hosting
+## Current State (v1.1 Shipped)
 
-**Goal:** Transform NANO from single-app to multi-app runtime with virtual host routing.
-
-**Target features:**
-- Multi-app registry (config file + folder discovery)
-- Virtual host routing (multiple apps on same port)
-- Per-app configuration (limits, entry point, env vars, custom routes)
-
----
-
-## Current State (v1.0 Shipped)
-
-**Version:** v1.0 MVP (shipped 2026-01-26)
-**Codebase:** 6,261 lines of Zig across 85 files
-**Status:** Production-ready for single-app hosting
+**Version:** v1.1 Multi-App Hosting (shipped 2026-02-01)
+**Codebase:** ~13,000 lines of Zig across 90+ files
+**Status:** Production-ready for multi-app hosting
 
 ### What's Working
 
+**Runtime (v1.0):**
 - V8 isolate execution with arena allocator per request
 - Workers-compatible APIs: console, TextEncoder/Decoder, atob/btoa, URL/URLSearchParams
 - Crypto: randomUUID, getRandomValues, subtle.digest, subtle.sign/verify
 - HTTP: fetch(), Request, Response, Headers, FormData, Blob, File
 - Async: event loop (libxev), setTimeout/setInterval, Promise-based handlers
-- Server: HTTP routing, health endpoints, Prometheus metrics, graceful shutdown
 - Safety: CPU watchdog (5s), memory limits (128MB), AbortController
+
+**Multi-App (v1.1):**
+- Virtual host routing (Host header -> app on single port)
+- Config-based app loading (JSON with hostname, path, limits)
+- Hot reload via config file watcher (2s poll, 500ms debounce)
+- Admin REST API: GET/POST/DELETE /admin/apps, POST /admin/reload
+- Atomic app add/remove without request drops
 
 ### Known Limitations
 
-- Single-app per process (multi-app registry deferred)
 - No V8 snapshots (compile-time caching only)
 - No isolate pooling (single-threaded)
 - REPL doesn't support timers
 - Response headers limited to content-type
+- Changed apps (same hostname, different path) not auto-detected
 
 ## Requirements
 
@@ -53,17 +49,19 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 - Structured logging per app — v1.0
 - Hard isolation between apps (memory, CPU limits enforced) — v1.0
 
-### Active (v1.1)
+### Validated (v1.1)
 
-- [ ] Multi-app registry (config file + folder discovery)
-- [ ] Virtual host routing (multiple apps on same port)
-- [ ] Per-app configuration (limits, entry point, env vars, custom routes)
+- Multi-app registry (config file + folder discovery) — v1.1
+- Virtual host routing (multiple apps on same port) — v1.1
+- Hot reload apps without restart — v1.1
 
 ### Future (v2 candidates)
 
 - [ ] Sub-5ms cold start for new isolates (via V8 snapshots)
 - [ ] Streams API (ReadableStream, WritableStream)
 - [ ] Isolate pooling (warm isolate reuse)
+- [ ] Graceful shutdown (drain connections, clean app removal)
+- [ ] Per-app environment variables
 
 ### Out of Scope
 
@@ -111,6 +109,27 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 | Script caching over snapshots | Snapshots too complex (callback serialization) | Good — fast enough for v1 |
 | Single-threaded MVP | Isolate pooling adds complexity | Good — simpler debugging |
 | libxev for event loop | Cross-platform, async I/O | Good — timer + fetch work |
+| Poll-based config watching | libxev lacks filesystem events | Good — simple and portable |
+| Function pointer callbacks | Avoids circular imports | Good — clean module separation |
+| Admin /admin/* prefix | Clear separation, easy to gate | Good — extensible |
 
 ---
-*Last updated: 2026-01-26 after v1.1 milestone start*
+
+<details>
+<summary>v1.0 → v1.1 Migration Notes</summary>
+
+**Breaking changes:** None. v1.1 is backwards compatible.
+
+**New features:**
+- Config file format extended with `hostname` field per app
+- Global `port` field in config for single-port hosting
+- Admin API at `/admin/*` endpoints
+
+**Upgrade path:**
+1. Update config to include `hostname` for each app
+2. (Optional) Use Admin API for runtime management
+
+</details>
+
+---
+*Last updated: 2026-02-01 after v1.1 milestone*

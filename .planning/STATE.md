@@ -2,61 +2,47 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-01-26)
+See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** Skip the container fleet entirely - one process hosts many isolated JS apps
-**Current focus:** Milestone v1.1 — Multi-App Hosting COMPLETE
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: v1.1 Complete
-Plan: All plans executed
-Status: Milestone v1.1 complete, ready for audit
-Last activity: 2026-02-01 — Completed Phase 2 (App Lifecycle & Hot Reload)
+Phase: No active milestone
+Plan: N/A
+Status: v1.1 shipped, ready for next milestone
+Last activity: 2026-02-01 — v1.1 Multi-App Hosting complete
 
-Progress: [██████████] 100% (v1.0)
-Progress: [██████████] 100% (v1.1)
+Progress: [##########] 100% (v1.0)
+Progress: [##########] 100% (v1.1)
 
-## v1.1 Phase Summary
+## Shipped Milestones
 
-| Phase | Name | Plans | Status |
-|-------|------|-------|--------|
-| 01 | Multi-App Virtual Host Routing | 1/1 | ✓ Complete |
-| 02 | App Lifecycle & Hot Reload | 2/2 | ✓ Complete |
+| Version | Name | Phases | Plans | Shipped |
+|---------|------|--------|-------|---------|
+| v1.0 | MVP | 6 | 14 | 2026-01-26 |
+| v1.1 | Multi-App Hosting | 2 | 3 | 2026-02-01 |
 
-## v1.0 Phase Summary
-
-| Phase | Name | Plans | Status |
-|-------|------|-------|--------|
-| 01 | V8 Foundation | 3/3 | ✓ Complete |
-| 02 | API Surface | 5/5 | ✓ Complete |
-| 03 | Multi-App Hosting | 3/3 | ✓ Complete |
-| 04 | Snapshots & Pooling | 1/1 | ✓ Complete |
-| 05 | Production Hardening | — | ✓ Complete (no plans needed) |
-| 06 | Async Fetch | 1/1 | ✓ Complete |
+See `.planning/MILESTONES.md` for details.
 
 ## Performance Metrics
 
-**Velocity (from v1.0):**
-- Total plans completed: 14 (v1.0) + 3 (v1.1) = 17
-- Phases: 6 (v1.0) + 2 (v1.1) = 8
-- Timeline: 8 days (v1.0), 1 day (v1.1)
+**Velocity:**
+- v1.0: 14 plans in 8 days
+- v1.1: 3 plans in 14 days (includes research + audit time)
+- Total: 17 plans, 8 phases
 
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Recent decisions affecting current work:
-
-- Script caching over V8 snapshots (callback serialization too complex)
-- Single-threaded MVP (isolate pooling deferred)
-- libxev for event loop (cross-platform async I/O)
+Key architectural decisions:
+- Zig + V8 for memory control and battle-tested JS engine
+- Workers API over Node API for simpler surface
+- Single-threaded MVP (pooling deferred)
 - Poll-based config watching (libxev lacks filesystem events)
-- Function pointer callback pattern (avoids circular imports)
-- Admin /admin/* prefix routing (clear separation, easy to gate)
-- Fixed buffer JSON building (no allocation for small responses)
-- Protect last app from deletion (server needs at least one app)
 
 ### Pending Todos
 
@@ -69,11 +55,17 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-01
-Stopped at: Milestone v1.1 complete
+Stopped at: v1.1 milestone complete
 Resume file: None
 
 ## Next Steps
 
-Milestone v1.1 complete. Options:
-1. `/gsd:audit-milestone` — Verify requirements, cross-phase integration
-2. `/gsd:complete-milestone` — Archive and prepare for v1.2
+v1.1 shipped. Start next milestone:
+
+`/gsd:new-milestone`
+
+This will:
+1. Gather requirements through questioning
+2. Research implementation approaches
+3. Create REQUIREMENTS.md for new milestone
+4. Create ROADMAP.md with phase breakdown
