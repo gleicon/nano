@@ -1,6 +1,120 @@
 const std = @import("std");
 const xev = @import("xev");
 
+// Forward declaration for HttpServer reload callback
+// Using function pointer to avoid circular import with http module
+pub const ReloadCallback = *const fn (*anyopaque) void;
+
+/// Config file watcher using poll-based mtime checking
+/// Polls config file every 2 seconds, triggers reload callback on changes
+pub const ConfigWatcher = struct {
+    timer: xev.Timer,
+    completion: xev.Completion,
+    config_path: []const u8,
+    last_mtime: i128,
+    last_change_time: i64, // For debounce (nanoseconds)
+    server_ptr: *anyopaque, // Pointer to HttpServer (opaque to avoid circular dep)
+    reload_callback: ReloadCallback,
+    active: bool,
+
+    const POLL_INTERVAL_MS: u64 = 2000; // Poll every 2 seconds
+    const DEBOUNCE_NS: i64 = 500_000_000; // 500ms debounce
+
+    /// Initialize config watcher with path and server reference
+    pub fn init(config_path: []const u8, server_ptr: *anyopaque, reload_callback: ReloadCallback) !ConfigWatcher {
+        // Get initial mtime
+        const file = std.fs.cwd().openFile(config_path, .{}) catch |err| {
+            // Log error but return with mtime=0 to retry on first poll
+            std.debug.print("ConfigWatcher: failed to open config file: {s}\n", .{@errorName(err)});
+            return ConfigWatcher{
+                .timer = try xev.Timer.init(),
+                .completion = undefined,
+                .config_path = config_path,
+                .last_mtime = 0,
+                .last_change_time = 0,
+                .server_ptr = server_ptr,
+                .reload_callback = reload_callback,
+                .active = true,
+            };
+        };
+        defer file.close();
+        const stat = try file.stat();
+
+        return ConfigWatcher{
+            .timer = try xev.Timer.init(),
+            .completion = undefined,
+            .config_path = config_path,
+            .last_mtime = stat.mtime,
+            .last_change_time = 0,
+            .server_ptr = server_ptr,
+            .reload_callback = reload_callback,
+            .active = true,
+        };
+    }
+
+    /// Start the config watcher timer on the event loop
+    pub fn start(self: *ConfigWatcher, loop: *xev.Loop) void {
+        self.timer.run(loop, &self.completion, POLL_INTERVAL_MS, ConfigWatcher, self, onTimer);
+    }
+
+    /// Stop the config watcher
+    pub fn stop(self: *ConfigWatcher) void {
+        self.active = false;
+    }
+
+    /// Cleanup resources
+    pub fn deinit(self: *ConfigWatcher) void {
+        self.active = false;
+        self.timer.deinit();
+    }
+
+    /// Timer callback - check config file mtime and trigger reload if changed
+    fn onTimer(
+        watcher_ptr: ?*ConfigWatcher,
+        loop: *xev.Loop,
+        completion: *xev.Completion,
+        result: xev.Timer.RunError!void,
+    ) xev.CallbackAction {
+        _ = loop;
+        _ = completion;
+        _ = result catch return .disarm;
+
+        const watcher = watcher_ptr orelse return .disarm;
+
+        if (!watcher.active) {
+            return .disarm;
+        }
+
+        // Try to stat the config file
+        const file = std.fs.cwd().openFile(watcher.config_path, .{}) catch {
+            // File temporarily inaccessible (editor save in progress), retry next poll
+            return .rearm;
+        };
+        defer file.close();
+
+        const stat = file.stat() catch {
+            // Stat failed, retry next poll
+            return .rearm;
+        };
+
+        // Check if mtime changed
+        if (stat.mtime != watcher.last_mtime) {
+            const now = std.time.nanoTimestamp();
+
+            // Debounce: only reload if enough time has passed since last change detected
+            if (watcher.last_change_time == 0 or (now - watcher.last_change_time) >= DEBOUNCE_NS) {
+                watcher.last_mtime = stat.mtime;
+                watcher.last_change_time = now;
+
+                // Call the reload callback on the server
+                watcher.reload_callback(watcher.server_ptr);
+            }
+        }
+
+        return .rearm; // Continue polling
+    }
+};
+
 /// Timer callback info stored for V8 integration
 pub const TimerCallback = struct {
     id: u32,
