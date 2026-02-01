@@ -50,7 +50,7 @@ zig build
 Create `my-app/index.js`:
 
 ```javascript
-__setDefault({
+export default {
     async fetch(request) {
         const url = new URL(request.url());
 
@@ -67,7 +67,7 @@ __setDefault({
 
         return new Response("Not Found", { status: 404 });
     }
-});
+};
 ```
 
 Run it:
@@ -110,19 +110,19 @@ Handlers can be sync or async:
 
 ```javascript
 // Sync handler
-__setDefault({
+export default {
     fetch(request) {
         return new Response("Hello!");
     }
-});
+};
 
 // Async handler
-__setDefault({
+export default {
     async fetch(request) {
         const data = await fetch("https://api.example.com/data");
         return new Response(data.text());
     }
-});
+};
 ```
 
 ### Request Object

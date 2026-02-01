@@ -86,7 +86,7 @@ function renderRSS() {
 }
 
 // NANO entry point
-__setDefault({
+export default {
   fetch(request) {
     const url = new URL(request.url());
     const path = url.pathname();

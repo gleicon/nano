@@ -1,5 +1,6 @@
 const std = @import("std");
 const v8 = @import("v8");
+const js = @import("js");
 
 /// Register URL APIs on global object
 pub fn registerURLAPIs(isolate: v8.Isolate, context: v8.Context) void {
@@ -10,65 +11,31 @@ pub fn registerURLAPIs(isolate: v8.Isolate, context: v8.Context) void {
     const url_proto = url_tmpl.getPrototypeTemplate();
 
     // URL property getters
-    addGetter(isolate, url_proto, "href", urlGetHref);
-    addGetter(isolate, url_proto, "origin", urlGetOrigin);
-    addGetter(isolate, url_proto, "protocol", urlGetProtocol);
-    addGetter(isolate, url_proto, "host", urlGetHost);
-    addGetter(isolate, url_proto, "hostname", urlGetHostname);
-    addGetter(isolate, url_proto, "port", urlGetPort);
-    addGetter(isolate, url_proto, "pathname", urlGetPathname);
-    addGetter(isolate, url_proto, "search", urlGetSearch);
-    addGetter(isolate, url_proto, "hash", urlGetHash);
+    js.addMethod(url_proto, isolate, "href", urlGetHref);
+    js.addMethod(url_proto, isolate, "origin", urlGetOrigin);
+    js.addMethod(url_proto, isolate, "protocol", urlGetProtocol);
+    js.addMethod(url_proto, isolate, "host", urlGetHost);
+    js.addMethod(url_proto, isolate, "hostname", urlGetHostname);
+    js.addMethod(url_proto, isolate, "port", urlGetPort);
+    js.addMethod(url_proto, isolate, "pathname", urlGetPathname);
+    js.addMethod(url_proto, isolate, "search", urlGetSearch);
+    js.addMethod(url_proto, isolate, "hash", urlGetHash);
+    js.addMethod(url_proto, isolate, "toString", urlGetHref);
 
-    // toString method
-    const tostring_fn = v8.FunctionTemplate.initCallback(isolate, urlGetHref);
-    url_proto.set(
-        v8.String.initUtf8(isolate, "toString").toName(),
-        tostring_fn,
-        v8.PropertyAttribute.None,
-    );
-
-    _ = global.setValue(
-        context,
-        v8.String.initUtf8(isolate, "URL"),
-        url_tmpl.getFunction(context),
-    );
+    js.addGlobalClass(global, context, isolate, "URL", url_tmpl);
 
     // Register URLSearchParams constructor
     const params_tmpl = v8.FunctionTemplate.initCallback(isolate, searchParamsConstructor);
     const params_proto = params_tmpl.getPrototypeTemplate();
 
-    // URLSearchParams methods
-    addMethod(isolate, params_proto, "get", searchParamsGet);
-    addMethod(isolate, params_proto, "has", searchParamsHas);
-    addMethod(isolate, params_proto, "set", searchParamsSet);
-    addMethod(isolate, params_proto, "append", searchParamsAppend);
-    addMethod(isolate, params_proto, "delete", searchParamsDelete);
-    addMethod(isolate, params_proto, "toString", searchParamsToString);
+    js.addMethod(params_proto, isolate, "get", searchParamsGet);
+    js.addMethod(params_proto, isolate, "has", searchParamsHas);
+    js.addMethod(params_proto, isolate, "set", searchParamsSet);
+    js.addMethod(params_proto, isolate, "append", searchParamsAppend);
+    js.addMethod(params_proto, isolate, "delete", searchParamsDelete);
+    js.addMethod(params_proto, isolate, "toString", searchParamsToString);
 
-    _ = global.setValue(
-        context,
-        v8.String.initUtf8(isolate, "URLSearchParams"),
-        params_tmpl.getFunction(context),
-    );
-}
-
-fn addGetter(isolate: v8.Isolate, proto: v8.ObjectTemplate, name: []const u8, callback: *const fn (?*const v8.C_FunctionCallbackInfo) callconv(.c) void) void {
-    const fn_tmpl = v8.FunctionTemplate.initCallback(isolate, callback);
-    proto.set(
-        v8.String.initUtf8(isolate, name).toName(),
-        fn_tmpl,
-        v8.PropertyAttribute.None,
-    );
-}
-
-fn addMethod(isolate: v8.Isolate, proto: v8.ObjectTemplate, name: []const u8, callback: *const fn (?*const v8.C_FunctionCallbackInfo) callconv(.c) void) void {
-    const fn_tmpl = v8.FunctionTemplate.initCallback(isolate, callback);
-    proto.set(
-        v8.String.initUtf8(isolate, name).toName(),
-        fn_tmpl,
-        v8.PropertyAttribute.None,
-    );
+    js.addGlobalClass(global, context, isolate, "URLSearchParams", params_tmpl);
 }
 
 // ============================================================================
@@ -76,43 +43,37 @@ fn addMethod(isolate: v8.Isolate, proto: v8.ObjectTemplate, name: []const u8, ca
 // ============================================================================
 
 fn urlConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "URL requires a url argument").toValue());
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "URL requires a url argument");
         return;
     }
 
-    const arg = info.getArg(0);
-    const str = arg.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "URL: invalid argument").toValue());
+    const str = ctx.arg(0).toString(ctx.context) catch {
+        js.throw(ctx.isolate, "URL: invalid argument");
         return;
     };
 
     var url_buf: [4096]u8 = undefined;
-    const url_len = str.writeUtf8(isolate, &url_buf);
-    const url_str = url_buf[0..url_len];
+    const url_str = js.readString(ctx.isolate, str, &url_buf);
 
     // Parse URL using Zig's std.Uri
     const uri = std.Uri.parse(url_str) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "URL: invalid URL").toValue());
+        js.throw(ctx.isolate, "URL: invalid URL");
         return;
     };
 
-    const this = info.getThis();
-
     // Store the original href
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_href"), v8.String.initUtf8(isolate, url_str).toValue());
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_href", js.string(ctx.isolate, url_str));
 
     // Store parsed components
     if (uri.scheme.len > 0) {
         var proto_buf: [64]u8 = undefined;
         const proto_str = std.fmt.bufPrint(&proto_buf, "{s}:", .{uri.scheme}) catch "";
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_protocol"), v8.String.initUtf8(isolate, proto_str).toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_protocol", js.string(ctx.isolate, proto_str));
     } else {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_protocol"), v8.String.initUtf8(isolate, "").toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_protocol", js.string(ctx.isolate, ""));
     }
 
     if (uri.host) |host| {
@@ -120,17 +81,17 @@ fn urlConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
             .raw => |r| r,
             .percent_encoded => |p| p,
         };
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_hostname"), v8.String.initUtf8(isolate, host_str).toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_hostname", js.string(ctx.isolate, host_str));
     } else {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_hostname"), v8.String.initUtf8(isolate, "").toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_hostname", js.string(ctx.isolate, ""));
     }
 
     if (uri.port) |port| {
         var port_buf: [8]u8 = undefined;
         const port_str = std.fmt.bufPrint(&port_buf, "{d}", .{port}) catch "";
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_port"), v8.String.initUtf8(isolate, port_str).toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_port", js.string(ctx.isolate, port_str));
     } else {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_port"), v8.String.initUtf8(isolate, "").toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_port", js.string(ctx.isolate, ""));
     }
 
     // Path
@@ -139,9 +100,9 @@ fn urlConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
         .percent_encoded => |p| p,
     };
     if (path_str.len > 0) {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_pathname"), v8.String.initUtf8(isolate, path_str).toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_pathname", js.string(ctx.isolate, path_str));
     } else {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_pathname"), v8.String.initUtf8(isolate, "/").toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_pathname", js.string(ctx.isolate, "/"));
     }
 
     // Query
@@ -152,11 +113,11 @@ fn urlConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
         };
         var search_buf: [2048]u8 = undefined;
         const search_str = std.fmt.bufPrint(&search_buf, "?{s}", .{query_str}) catch "";
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_search"), v8.String.initUtf8(isolate, search_str).toValue());
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_query"), v8.String.initUtf8(isolate, query_str).toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_search", js.string(ctx.isolate, search_str));
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_query", js.string(ctx.isolate, query_str));
     } else {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_search"), v8.String.initUtf8(isolate, "").toValue());
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_query"), v8.String.initUtf8(isolate, "").toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_search", js.string(ctx.isolate, ""));
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_query", js.string(ctx.isolate, ""));
     }
 
     // Fragment
@@ -167,127 +128,110 @@ fn urlConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
         };
         var hash_buf: [1024]u8 = undefined;
         const hash_str = std.fmt.bufPrint(&hash_buf, "#{s}", .{frag_str}) catch "";
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_hash"), v8.String.initUtf8(isolate, hash_str).toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_hash", js.string(ctx.isolate, hash_str));
     } else {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_hash"), v8.String.initUtf8(isolate, "").toValue());
+        _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_hash", js.string(ctx.isolate, ""));
     }
 }
 
-fn getStoredProperty(info: v8.FunctionCallbackInfo, prop: []const u8) v8.Value {
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
-    return this.getValue(context, v8.String.initUtf8(isolate, prop)) catch v8.String.initUtf8(isolate, "").toValue();
-}
-
 fn urlGetHref(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_href"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_href") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }
 
 fn urlGetOrigin(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    // Origin = protocol + "//" + host
-    const protocol = this.getValue(context, v8.String.initUtf8(isolate, "_protocol")) catch return;
-    const hostname = this.getValue(context, v8.String.initUtf8(isolate, "_hostname")) catch return;
-    const port = this.getValue(context, v8.String.initUtf8(isolate, "_port")) catch return;
+    const protocol = js.getProp(ctx.this, ctx.context, ctx.isolate, "_protocol") catch return;
+    const hostname = js.getProp(ctx.this, ctx.context, ctx.isolate, "_hostname") catch return;
+    const port = js.getProp(ctx.this, ctx.context, ctx.isolate, "_port") catch return;
 
     var proto_buf: [64]u8 = undefined;
     var host_buf: [256]u8 = undefined;
     var port_buf: [8]u8 = undefined;
 
-    const proto_str = protocol.toString(context) catch return;
-    const host_str = hostname.toString(context) catch return;
-    const port_str = port.toString(context) catch return;
+    const proto_str = protocol.toString(ctx.context) catch return;
+    const host_str = hostname.toString(ctx.context) catch return;
+    const port_str = port.toString(ctx.context) catch return;
 
-    const proto_len = proto_str.writeUtf8(isolate, &proto_buf);
-    const host_len = host_str.writeUtf8(isolate, &host_buf);
-    const port_len = port_str.writeUtf8(isolate, &port_buf);
+    const proto = js.readString(ctx.isolate, proto_str, &proto_buf);
+    const host = js.readString(ctx.isolate, host_str, &host_buf);
+    const p = js.readString(ctx.isolate, port_str, &port_buf);
 
     var origin_buf: [512]u8 = undefined;
-    var origin_str: []const u8 = undefined;
+    var origin: []const u8 = undefined;
 
-    if (port_len > 0) {
-        origin_str = std.fmt.bufPrint(&origin_buf, "{s}//{s}:{s}", .{
-            proto_buf[0..proto_len],
-            host_buf[0..host_len],
-            port_buf[0..port_len],
-        }) catch "";
+    if (p.len > 0) {
+        origin = std.fmt.bufPrint(&origin_buf, "{s}//{s}:{s}", .{ proto, host, p }) catch "";
     } else {
-        origin_str = std.fmt.bufPrint(&origin_buf, "{s}//{s}", .{
-            proto_buf[0..proto_len],
-            host_buf[0..host_len],
-        }) catch "";
+        origin = std.fmt.bufPrint(&origin_buf, "{s}//{s}", .{ proto, host }) catch "";
     }
 
-    info.getReturnValue().set(v8.String.initUtf8(isolate, origin_str).toValue());
+    js.retString(ctx, origin);
 }
 
 fn urlGetProtocol(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_protocol"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_protocol") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }
 
 fn urlGetHost(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    const hostname = this.getValue(context, v8.String.initUtf8(isolate, "_hostname")) catch return;
-    const port = this.getValue(context, v8.String.initUtf8(isolate, "_port")) catch return;
+    const hostname = js.getProp(ctx.this, ctx.context, ctx.isolate, "_hostname") catch return;
+    const port = js.getProp(ctx.this, ctx.context, ctx.isolate, "_port") catch return;
 
     var host_buf: [256]u8 = undefined;
     var port_buf: [8]u8 = undefined;
 
-    const host_str = hostname.toString(context) catch return;
-    const port_str = port.toString(context) catch return;
+    const host_str = hostname.toString(ctx.context) catch return;
+    const port_str = port.toString(ctx.context) catch return;
 
-    const host_len = host_str.writeUtf8(isolate, &host_buf);
-    const port_len = port_str.writeUtf8(isolate, &port_buf);
+    const host = js.readString(ctx.isolate, host_str, &host_buf);
+    const p = js.readString(ctx.isolate, port_str, &port_buf);
 
     var result_buf: [280]u8 = undefined;
-    var result_str: []const u8 = undefined;
+    var result: []const u8 = undefined;
 
-    if (port_len > 0) {
-        result_str = std.fmt.bufPrint(&result_buf, "{s}:{s}", .{
-            host_buf[0..host_len],
-            port_buf[0..port_len],
-        }) catch "";
+    if (p.len > 0) {
+        result = std.fmt.bufPrint(&result_buf, "{s}:{s}", .{ host, p }) catch "";
     } else {
-        result_str = host_buf[0..host_len];
+        result = host;
     }
 
-    info.getReturnValue().set(v8.String.initUtf8(isolate, result_str).toValue());
+    js.retString(ctx, result);
 }
 
 fn urlGetHostname(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_hostname"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_hostname") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }
 
 fn urlGetPort(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_port"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_port") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }
 
 fn urlGetPathname(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_pathname"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_pathname") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }
 
 fn urlGetSearch(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_search"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_search") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }
 
 fn urlGetHash(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_hash"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_hash") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }
 
 // ============================================================================
@@ -295,69 +239,58 @@ fn urlGetHash(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 // ============================================================================
 
 fn searchParamsConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    // Initialize empty params string
     var init_str: []const u8 = "";
 
-    if (info.length() >= 1) {
-        const arg = info.getArg(0);
+    if (ctx.argc() >= 1) {
+        const arg = ctx.arg(0);
         if (arg.isString()) {
-            const str = arg.toString(context) catch {
-                _ = this.setValue(context, v8.String.initUtf8(isolate, "_params"), v8.String.initUtf8(isolate, "").toValue());
+            const str = arg.toString(ctx.context) catch {
+                _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_params", js.string(ctx.isolate, ""));
                 return;
             };
             var buf: [4096]u8 = undefined;
-            const len = str.writeUtf8(isolate, &buf);
+            const full_str = js.readString(ctx.isolate, str, &buf);
             // Remove leading ? if present
-            if (len > 0 and buf[0] == '?') {
-                init_str = buf[1..len];
+            if (full_str.len > 0 and full_str[0] == '?') {
+                init_str = full_str[1..];
             } else {
-                init_str = buf[0..len];
+                init_str = full_str;
             }
         }
     }
 
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_params"), v8.String.initUtf8(isolate, init_str).toValue());
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_params", js.string(ctx.isolate, init_str));
 }
 
 fn searchParamsGet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    if (ctx.argc() < 1) {
+        js.retNull(ctx);
         return;
     }
 
-    const key_arg = info.getArg(0);
-    const key_str = key_arg.toString(context) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    const key_str = ctx.arg(0).toString(ctx.context) catch {
+        js.retNull(ctx);
         return;
     };
 
     var key_buf: [256]u8 = undefined;
-    const key_len = key_str.writeUtf8(isolate, &key_buf);
-    const key = key_buf[0..key_len];
+    const key = js.readString(ctx.isolate, key_str, &key_buf);
 
-    // Get stored params
-    const this = info.getThis();
-    const params_val = this.getValue(context, v8.String.initUtf8(isolate, "_params")) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    const params_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_params") catch {
+        js.retNull(ctx);
         return;
     };
-    const params_str = params_val.toString(context) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    const params_str = params_val.toString(ctx.context) catch {
+        js.retNull(ctx);
         return;
     };
 
     var params_buf: [4096]u8 = undefined;
-    const params_len = params_str.writeUtf8(isolate, &params_buf);
-    const params = params_buf[0..params_len];
+    const params = js.readString(ctx.isolate, params_str, &params_buf);
 
     // Parse and find key
     var iter = std.mem.splitScalar(u8, params, '&');
@@ -366,95 +299,75 @@ fn searchParamsGet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
             const k = pair[0..eq_pos];
             const v = pair[eq_pos + 1 ..];
             if (std.mem.eql(u8, k, key)) {
-                info.getReturnValue().set(v8.String.initUtf8(isolate, v).toValue());
+                js.retString(ctx, v);
                 return;
             }
         }
     }
 
-    info.getReturnValue().set(isolate.initNull().toValue());
+    js.retNull(ctx);
 }
 
 fn searchParamsHas(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    if (ctx.argc() < 1) {
+        js.retBool(ctx, false);
         return;
     }
 
-    const key_arg = info.getArg(0);
-    const key_str = key_arg.toString(context) catch {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    const key_str = ctx.arg(0).toString(ctx.context) catch {
+        js.retBool(ctx, false);
         return;
     };
 
     var key_buf: [256]u8 = undefined;
-    const key_len = key_str.writeUtf8(isolate, &key_buf);
-    const key = key_buf[0..key_len];
+    const key = js.readString(ctx.isolate, key_str, &key_buf);
 
-    // Get stored params
-    const this = info.getThis();
-    const params_val = this.getValue(context, v8.String.initUtf8(isolate, "_params")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    const params_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_params") catch {
+        js.retBool(ctx, false);
         return;
     };
-    const params_str = params_val.toString(context) catch {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    const params_str = params_val.toString(ctx.context) catch {
+        js.retBool(ctx, false);
         return;
     };
 
     var params_buf: [4096]u8 = undefined;
-    const params_len = params_str.writeUtf8(isolate, &params_buf);
-    const params = params_buf[0..params_len];
+    const params = js.readString(ctx.isolate, params_str, &params_buf);
 
-    // Parse and find key
     var iter = std.mem.splitScalar(u8, params, '&');
     while (iter.next()) |pair| {
         if (std.mem.indexOfScalar(u8, pair, '=')) |eq_pos| {
             const k = pair[0..eq_pos];
             if (std.mem.eql(u8, k, key)) {
-                info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, true).handle });
+                js.retBool(ctx, true);
                 return;
             }
         }
     }
 
-    info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    js.retBool(ctx, false);
 }
 
 fn searchParamsSet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 2) {
-        return;
-    }
+    if (ctx.argc() < 2) return;
 
-    const key_arg = info.getArg(0);
-    const val_arg = info.getArg(1);
-
-    const key_str = key_arg.toString(context) catch return;
-    const val_str = val_arg.toString(context) catch return;
+    const key_str = ctx.arg(0).toString(ctx.context) catch return;
+    const val_str = ctx.arg(1).toString(ctx.context) catch return;
 
     var key_buf: [256]u8 = undefined;
     var val_buf: [1024]u8 = undefined;
-    const key_len = key_str.writeUtf8(isolate, &key_buf);
-    const val_len = val_str.writeUtf8(isolate, &val_buf);
-    const key = key_buf[0..key_len];
-    const value = val_buf[0..val_len];
+    const key = js.readString(ctx.isolate, key_str, &key_buf);
+    const value = js.readString(ctx.isolate, val_str, &val_buf);
 
-    // Get current params
-    const this = info.getThis();
-    const params_val = this.getValue(context, v8.String.initUtf8(isolate, "_params")) catch return;
-    const params_str = params_val.toString(context) catch return;
+    const params_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_params") catch return;
+    const params_str = params_val.toString(ctx.context) catch return;
 
     var params_buf: [4096]u8 = undefined;
-    const params_len = params_str.writeUtf8(isolate, &params_buf);
-    const params = params_buf[0..params_len];
+    const params = js.readString(ctx.isolate, params_str, &params_buf);
 
     // Build new params, replacing existing key
     var result_buf: [8192]u8 = undefined;
@@ -468,7 +381,6 @@ fn searchParamsSet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
         if (std.mem.indexOfScalar(u8, pair, '=')) |eq_pos| {
             const k = pair[0..eq_pos];
             if (std.mem.eql(u8, k, key)) {
-                // Replace with new value
                 if (result_len > 0) {
                     result_buf[result_len] = '&';
                     result_len += 1;
@@ -481,7 +393,6 @@ fn searchParamsSet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                 result_len += value.len;
                 found = true;
             } else {
-                // Keep existing pair
                 if (result_len > 0) {
                     result_buf[result_len] = '&';
                     result_len += 1;
@@ -492,7 +403,6 @@ fn searchParamsSet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
         }
     }
 
-    // If key wasn't found, append it
     if (!found) {
         if (result_len > 0) {
             result_buf[result_len] = '&';
@@ -506,42 +416,31 @@ fn searchParamsSet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
         result_len += value.len;
     }
 
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_params"), v8.String.initUtf8(isolate, result_buf[0..result_len]).toValue());
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_params", js.string(ctx.isolate, result_buf[0..result_len]));
 }
 
 fn searchParamsAppend(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 2) {
-        return;
-    }
+    if (ctx.argc() < 2) return;
 
-    const key_arg = info.getArg(0);
-    const val_arg = info.getArg(1);
-
-    const key_str = key_arg.toString(context) catch return;
-    const val_str = val_arg.toString(context) catch return;
+    const key_str = ctx.arg(0).toString(ctx.context) catch return;
+    const val_str = ctx.arg(1).toString(ctx.context) catch return;
 
     var key_buf: [256]u8 = undefined;
     var val_buf: [1024]u8 = undefined;
-    const key_len = key_str.writeUtf8(isolate, &key_buf);
-    const val_len = val_str.writeUtf8(isolate, &val_buf);
+    const key_len = key_str.writeUtf8(ctx.isolate, &key_buf);
+    const val_len = val_str.writeUtf8(ctx.isolate, &val_buf);
 
-    // Get current params
-    const this = info.getThis();
-    const params_val = this.getValue(context, v8.String.initUtf8(isolate, "_params")) catch return;
-    const params_str = params_val.toString(context) catch return;
+    const params_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_params") catch return;
+    const params_str = params_val.toString(ctx.context) catch return;
 
     var params_buf: [4096]u8 = undefined;
-    const params_len = params_str.writeUtf8(isolate, &params_buf);
+    const params_len = params_str.writeUtf8(ctx.isolate, &params_buf);
 
-    // Build new params string
     var result_buf: [8192]u8 = undefined;
     var result_len: usize = 0;
 
-    // Copy existing
     if (params_len > 0) {
         @memcpy(result_buf[0..params_len], params_buf[0..params_len]);
         result_len = params_len;
@@ -549,7 +448,6 @@ fn searchParamsAppend(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
         result_len += 1;
     }
 
-    // Append new
     @memcpy(result_buf[result_len .. result_len + key_len], key_buf[0..key_len]);
     result_len += key_len;
     result_buf[result_len] = '=';
@@ -557,35 +455,25 @@ fn searchParamsAppend(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
     @memcpy(result_buf[result_len .. result_len + val_len], val_buf[0..val_len]);
     result_len += val_len;
 
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_params"), v8.String.initUtf8(isolate, result_buf[0..result_len]).toValue());
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_params", js.string(ctx.isolate, result_buf[0..result_len]));
 }
 
 fn searchParamsDelete(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        return;
-    }
+    if (ctx.argc() < 1) return;
 
-    const key_arg = info.getArg(0);
-    const key_str = key_arg.toString(context) catch return;
+    const key_str = ctx.arg(0).toString(ctx.context) catch return;
 
     var key_buf: [256]u8 = undefined;
-    const key_len = key_str.writeUtf8(isolate, &key_buf);
-    const key = key_buf[0..key_len];
+    const key = js.readString(ctx.isolate, key_str, &key_buf);
 
-    // Get current params
-    const this = info.getThis();
-    const params_val = this.getValue(context, v8.String.initUtf8(isolate, "_params")) catch return;
-    const params_str = params_val.toString(context) catch return;
+    const params_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_params") catch return;
+    const params_str = params_val.toString(ctx.context) catch return;
 
     var params_buf: [4096]u8 = undefined;
-    const params_len = params_str.writeUtf8(isolate, &params_buf);
-    const params = params_buf[0..params_len];
+    const params = js.readString(ctx.isolate, params_str, &params_buf);
 
-    // Build new params without the key
     var result_buf: [8192]u8 = undefined;
     var result_len: usize = 0;
 
@@ -606,10 +494,11 @@ fn searchParamsDelete(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
         }
     }
 
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_params"), v8.String.initUtf8(isolate, result_buf[0..result_len]).toValue());
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_params", js.string(ctx.isolate, result_buf[0..result_len]));
 }
 
 fn searchParamsToString(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    info.getReturnValue().set(getStoredProperty(info, "_params"));
+    const ctx = js.CallbackContext.init(raw_info);
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_params") catch js.string(ctx.isolate, "").toValue();
+    js.ret(ctx, val);
 }

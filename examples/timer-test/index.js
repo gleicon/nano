@@ -1,7 +1,7 @@
 // Timer test app - tests setTimeout, setInterval, clearTimeout, clearInterval
 let requestCount = 0;
 
-__setDefault({
+export default {
     fetch(request) {
         requestCount++;
         const urlStr = request.url();

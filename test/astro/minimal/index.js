@@ -49,7 +49,7 @@ function router(pathname) {
 }
 
 // NANO entry point
-__setDefault({
+export default {
   fetch(request) {
     const url = new URL(request.url());
     const route = router(url.pathname());

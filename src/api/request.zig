@@ -1,5 +1,6 @@
 const std = @import("std");
 const v8 = @import("v8");
+const js = @import("js");
 
 /// Register Request class on global object
 pub fn registerRequestAPI(isolate: v8.Isolate, context: v8.Context) void {
@@ -9,85 +10,63 @@ pub fn registerRequestAPI(isolate: v8.Isolate, context: v8.Context) void {
     const request_tmpl = v8.FunctionTemplate.initCallback(isolate, requestConstructor);
     const request_proto = request_tmpl.getPrototypeTemplate();
 
-    // Request property getters (implemented as methods for simplicity)
-    const url_fn = v8.FunctionTemplate.initCallback(isolate, requestUrl);
-    request_proto.set(v8.String.initUtf8(isolate, "url").toName(), url_fn, v8.PropertyAttribute.None);
+    js.addMethod(request_proto, isolate, "url", requestUrl);
+    js.addMethod(request_proto, isolate, "method", requestMethod);
+    js.addMethod(request_proto, isolate, "headers", requestHeaders);
+    js.addMethod(request_proto, isolate, "text", requestText);
+    js.addMethod(request_proto, isolate, "json", requestJson);
 
-    const method_fn = v8.FunctionTemplate.initCallback(isolate, requestMethod);
-    request_proto.set(v8.String.initUtf8(isolate, "method").toName(), method_fn, v8.PropertyAttribute.None);
-
-    const headers_fn = v8.FunctionTemplate.initCallback(isolate, requestHeaders);
-    request_proto.set(v8.String.initUtf8(isolate, "headers").toName(), headers_fn, v8.PropertyAttribute.None);
-
-    const text_fn = v8.FunctionTemplate.initCallback(isolate, requestText);
-    request_proto.set(v8.String.initUtf8(isolate, "text").toName(), text_fn, v8.PropertyAttribute.None);
-
-    const json_fn = v8.FunctionTemplate.initCallback(isolate, requestJson);
-    request_proto.set(v8.String.initUtf8(isolate, "json").toName(), json_fn, v8.PropertyAttribute.None);
-
-    _ = global.setValue(
-        context,
-        v8.String.initUtf8(isolate, "Request"),
-        request_tmpl.getFunction(context),
-    );
+    js.addGlobalClass(global, context, isolate, "Request", request_tmpl);
 }
 
 fn requestConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    // First argument: URL (required)
-    if (info.length() < 1) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Request requires a URL argument").toValue());
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "Request requires a URL argument");
         return;
     }
 
-    const url_arg = info.getArg(0);
-    const url_str = url_arg.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Request: invalid URL").toValue());
+    const url_str = ctx.arg(0).toString(ctx.context) catch {
+        js.throw(ctx.isolate, "Request: invalid URL");
         return;
     };
 
     // Store URL
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_url"), url_str.toValue());
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_url", url_str);
 
     // Default values
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_method"), v8.String.initUtf8(isolate, "GET").toValue());
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), v8.String.initUtf8(isolate, "").toValue());
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_method", js.string(ctx.isolate, "GET"));
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_body", js.string(ctx.isolate, ""));
 
     // Create headers object
-    const headers_obj = isolate.initObjectTemplateDefault().initInstance(context);
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_headers"), headers_obj);
+    const headers_obj = js.object(ctx.isolate, ctx.context);
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_headers", headers_obj);
 
     // Second argument: options (optional)
-    if (info.length() >= 2) {
-        const opts_arg = info.getArg(1);
+    if (ctx.argc() >= 2) {
+        const opts_arg = ctx.arg(1);
         if (opts_arg.isObject()) {
-            const opts_obj = v8.Object{ .handle = @ptrCast(opts_arg.handle) };
+            const opts = js.asObject(opts_arg);
 
-            // Check for method
-            const method_val = opts_obj.getValue(context, v8.String.initUtf8(isolate, "method")) catch null;
+            const method_val = js.getProp(opts, ctx.context, ctx.isolate, "method") catch null;
             if (method_val) |mv| {
                 if (mv.isString()) {
-                    _ = this.setValue(context, v8.String.initUtf8(isolate, "_method"), mv);
+                    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_method", mv);
                 }
             }
 
-            // Check for body
-            const body_val = opts_obj.getValue(context, v8.String.initUtf8(isolate, "body")) catch null;
+            const body_val = js.getProp(opts, ctx.context, ctx.isolate, "body") catch null;
             if (body_val) |bv| {
                 if (bv.isString()) {
-                    _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), bv);
+                    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_body", bv);
                 }
             }
 
-            // Check for headers
-            const hdrs_val = opts_obj.getValue(context, v8.String.initUtf8(isolate, "headers")) catch null;
+            const hdrs_val = js.getProp(opts, ctx.context, ctx.isolate, "headers") catch null;
             if (hdrs_val) |hv| {
                 if (hv.isObject()) {
-                    _ = this.setValue(context, v8.String.initUtf8(isolate, "_headers"), hv);
+                    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_headers", hv);
                 }
             }
         }
@@ -95,102 +74,85 @@ fn requestConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
 }
 
 fn requestUrl(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    const url_val = this.getValue(context, v8.String.initUtf8(isolate, "_url")) catch {
-        info.getReturnValue().set(v8.String.initUtf8(isolate, "").toValue());
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_url") catch {
+        js.retString(ctx, "");
         return;
     };
-    info.getReturnValue().set(url_val);
+    js.ret(ctx, val);
 }
 
 fn requestMethod(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    const method_val = this.getValue(context, v8.String.initUtf8(isolate, "_method")) catch {
-        info.getReturnValue().set(v8.String.initUtf8(isolate, "GET").toValue());
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_method") catch {
+        js.retString(ctx, "GET");
         return;
     };
-    info.getReturnValue().set(method_val);
+    js.ret(ctx, val);
 }
 
 fn requestHeaders(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    const headers_val = this.getValue(context, v8.String.initUtf8(isolate, "_headers")) catch {
-        info.getReturnValue().set(isolate.initObjectTemplateDefault().initInstance(context));
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_headers") catch {
+        js.ret(ctx, js.object(ctx.isolate, ctx.context));
         return;
     };
-    info.getReturnValue().set(headers_val);
+    js.ret(ctx, val);
 }
 
 fn requestText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    const body_val = this.getValue(context, v8.String.initUtf8(isolate, "_body")) catch {
-        info.getReturnValue().set(v8.String.initUtf8(isolate, "").toValue());
+    const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_body") catch {
+        js.retString(ctx, "");
         return;
     };
-    info.getReturnValue().set(body_val);
+    js.ret(ctx, val);
 }
 
 fn requestJson(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    const body_val = this.getValue(context, v8.String.initUtf8(isolate, "_body")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Request.json: no body").toValue());
+    const body_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_body") catch {
+        js.throw(ctx.isolate, "Request.json: no body");
         return;
     };
 
-    const body_str = body_val.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Request.json: invalid body").toValue());
+    const body_str = body_val.toString(ctx.context) catch {
+        js.throw(ctx.isolate, "Request.json: invalid body");
         return;
     };
 
     var body_buf: [65536]u8 = undefined;
-    const body_len = body_str.writeUtf8(isolate, &body_buf);
-    const body = body_buf[0..body_len];
+    const body = js.readString(ctx.isolate, body_str, &body_buf);
 
     // Use V8's JSON.parse
-    const global = context.getGlobal();
-    const json_val = global.getValue(context, v8.String.initUtf8(isolate, "JSON")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Request.json: JSON not found").toValue());
+    const global = ctx.context.getGlobal();
+    const json_val = js.getProp(global, ctx.context, ctx.isolate, "JSON") catch {
+        js.throw(ctx.isolate, "Request.json: JSON not found");
         return;
     };
 
-    const json_obj = v8.Object{ .handle = @ptrCast(json_val.handle) };
-    const parse_fn_val = json_obj.getValue(context, v8.String.initUtf8(isolate, "parse")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Request.json: JSON.parse not found").toValue());
+    const json_obj = js.asObject(json_val);
+    const parse_fn_val = js.getProp(json_obj, ctx.context, ctx.isolate, "parse") catch {
+        js.throw(ctx.isolate, "Request.json: JSON.parse not found");
         return;
     };
 
-    const parse_fn = v8.Function{ .handle = @ptrCast(parse_fn_val.handle) };
-    var args: [1]v8.Value = .{v8.String.initUtf8(isolate, body).toValue()};
-    const result = parse_fn.call(context, json_val, &args) orelse {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Request.json: parse failed").toValue());
+    const parse_fn = js.asFunction(parse_fn_val);
+    var args: [1]v8.Value = .{js.string(ctx.isolate, body).toValue()};
+    const result = parse_fn.call(ctx.context, json_val, &args) orelse {
+        js.throw(ctx.isolate, "Request.json: parse failed");
         return;
     };
 
-    info.getReturnValue().set(result);
+    js.ret(ctx, result);
 }
 
 /// Create a Request object from Zig HTTP request data
-/// This is called from the HTTP server to create Request objects for JS handlers
 pub fn createRequest(
     isolate: v8.Isolate,
     context: v8.Context,
@@ -198,21 +160,18 @@ pub fn createRequest(
     method: []const u8,
     body: []const u8,
 ) v8.Object {
-    // Get Request constructor
     const global = context.getGlobal();
-    const ctor_val = global.getValue(context, v8.String.initUtf8(isolate, "Request")) catch {
+    const ctor_val = js.getProp(global, context, isolate, "Request") catch {
         return isolate.initObjectTemplateDefault().initInstance(context);
     };
-    const ctor = v8.Function{ .handle = @ptrCast(ctor_val.handle) };
+    const ctor = js.asFunction(ctor_val);
 
-    // Create URL string and options object
-    const url_v8 = v8.String.initUtf8(isolate, url).toValue();
-    const opts = isolate.initObjectTemplateDefault().initInstance(context);
-    _ = opts.setValue(context, v8.String.initUtf8(isolate, "method"), v8.String.initUtf8(isolate, method).toValue());
-    _ = opts.setValue(context, v8.String.initUtf8(isolate, "body"), v8.String.initUtf8(isolate, body).toValue());
+    const url_v8 = js.string(isolate, url).toValue();
+    const opts = js.object(isolate, context);
+    _ = js.setProp(opts, context, isolate, "method", js.string(isolate, method));
+    _ = js.setProp(opts, context, isolate, "body", js.string(isolate, body));
 
-    // Call constructor
-    var args: [2]v8.Value = .{ url_v8, v8.Value{ .handle = @ptrCast(opts.handle) } };
+    var args: [2]v8.Value = .{ url_v8, js.objToValue(opts) };
     const result = ctor.initInstance(context, &args) orelse {
         return isolate.initObjectTemplateDefault().initInstance(context);
     };

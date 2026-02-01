@@ -19,6 +19,14 @@ pub fn build(b: *std.Build) void {
     });
     const xev_module = xev_dep.module("xev");
 
+    // Create js helper module
+    const js_module = b.createModule(.{
+        .root_source_file = b.path("src/js.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    js_module.addImport("v8", v8_module);
+
     // Create api/console module
     const console_module = b.createModule(.{
         .root_source_file = b.path("src/api/console.zig"),
@@ -26,6 +34,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     console_module.addImport("v8", v8_module);
+    console_module.addImport("js", js_module);
 
     // Create api/encoding module
     const encoding_module = b.createModule(.{
@@ -34,6 +43,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     encoding_module.addImport("v8", v8_module);
+    encoding_module.addImport("js", js_module);
 
     // Create api/url module
     const url_module = b.createModule(.{
@@ -42,6 +52,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     url_module.addImport("v8", v8_module);
+    url_module.addImport("js", js_module);
 
     // Create api/crypto module
     const crypto_module = b.createModule(.{
@@ -50,6 +61,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     crypto_module.addImport("v8", v8_module);
+    crypto_module.addImport("js", js_module);
 
     // Create api/fetch module
     const fetch_module = b.createModule(.{
@@ -58,6 +70,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     fetch_module.addImport("v8", v8_module);
+    fetch_module.addImport("js", js_module);
 
     // Create api/headers module
     const headers_module = b.createModule(.{
@@ -66,6 +79,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     headers_module.addImport("v8", v8_module);
+    headers_module.addImport("js", js_module);
 
     // Create api/request module
     const request_module = b.createModule(.{
@@ -74,6 +88,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     request_module.addImport("v8", v8_module);
+    request_module.addImport("js", js_module);
 
     // Create api/abort module
     const abort_module = b.createModule(.{
@@ -82,6 +97,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     abort_module.addImport("v8", v8_module);
+    abort_module.addImport("js", js_module);
 
     // Create api/blob module
     const blob_module = b.createModule(.{
@@ -90,6 +106,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     blob_module.addImport("v8", v8_module);
+    blob_module.addImport("js", js_module);
 
     // Create api/formdata module
     const formdata_module = b.createModule(.{
@@ -98,6 +115,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     formdata_module.addImport("v8", v8_module);
+    formdata_module.addImport("js", js_module);
 
     // Create log module
     const log_module = b.createModule(.{

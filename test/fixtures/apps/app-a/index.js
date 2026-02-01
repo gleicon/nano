@@ -1,7 +1,7 @@
 // App A - Multi-app config test
 // Returns app identifier and timestamp
 
-__setDefault({
+export default {
   fetch(request) {
     const url = new URL(request.url());
     return new Response(JSON.stringify({

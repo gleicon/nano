@@ -1,5 +1,5 @@
 // Simple NANO app
-__setDefault({
+export default {
   fetch(request) {
     const url = request.url();
     const method = request.method();

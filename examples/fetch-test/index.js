@@ -1,7 +1,7 @@
 // Fetch test app - tests async/await with fetch()
 let requestCount = 0;
 
-__setDefault({
+export default {
     // Async handler - returns a Promise that nano will await
     async fetch(request) {
         requestCount++;

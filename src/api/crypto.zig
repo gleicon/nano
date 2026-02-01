@@ -1,5 +1,6 @@
 const std = @import("std");
 const v8 = @import("v8");
+const js = @import("js");
 
 /// Register crypto APIs on global object
 pub fn registerCryptoAPIs(isolate: v8.Isolate, context: v8.Context) void {
@@ -8,69 +9,27 @@ pub fn registerCryptoAPIs(isolate: v8.Isolate, context: v8.Context) void {
     // Create crypto object
     const crypto_tmpl = isolate.initObjectTemplateDefault();
 
-    // crypto.randomUUID()
-    const uuid_fn = v8.FunctionTemplate.initCallback(isolate, randomUUIDCallback);
-    crypto_tmpl.set(
-        v8.String.initUtf8(isolate, "randomUUID").toName(),
-        uuid_fn,
-        v8.PropertyAttribute.None,
-    );
-
-    // crypto.getRandomValues()
-    const random_fn = v8.FunctionTemplate.initCallback(isolate, getRandomValuesCallback);
-    crypto_tmpl.set(
-        v8.String.initUtf8(isolate, "getRandomValues").toName(),
-        random_fn,
-        v8.PropertyAttribute.None,
-    );
+    js.addMethod(crypto_tmpl, isolate, "randomUUID", randomUUIDCallback);
+    js.addMethod(crypto_tmpl, isolate, "getRandomValues", getRandomValuesCallback);
 
     // Create crypto.subtle object
     const subtle_tmpl = isolate.initObjectTemplateDefault();
 
-    // crypto.subtle.digest()
-    const digest_fn = v8.FunctionTemplate.initCallback(isolate, digestCallback);
-    subtle_tmpl.set(
-        v8.String.initUtf8(isolate, "digest").toName(),
-        digest_fn,
-        v8.PropertyAttribute.None,
-    );
-
-    // crypto.subtle.sign()
-    const sign_fn = v8.FunctionTemplate.initCallback(isolate, signCallback);
-    subtle_tmpl.set(
-        v8.String.initUtf8(isolate, "sign").toName(),
-        sign_fn,
-        v8.PropertyAttribute.None,
-    );
-
-    // crypto.subtle.verify()
-    const verify_fn = v8.FunctionTemplate.initCallback(isolate, verifyCallback);
-    subtle_tmpl.set(
-        v8.String.initUtf8(isolate, "verify").toName(),
-        verify_fn,
-        v8.PropertyAttribute.None,
-    );
+    js.addMethod(subtle_tmpl, isolate, "digest", digestCallback);
+    js.addMethod(subtle_tmpl, isolate, "sign", signCallback);
+    js.addMethod(subtle_tmpl, isolate, "verify", verifyCallback);
 
     // Add subtle to crypto
     const subtle_obj = subtle_tmpl.initInstance(context);
     const crypto_obj = crypto_tmpl.initInstance(context);
-    _ = crypto_obj.setValue(
-        context,
-        v8.String.initUtf8(isolate, "subtle"),
-        subtle_obj,
-    );
+    _ = js.setProp(crypto_obj, context, isolate, "subtle", subtle_obj);
 
     // Add crypto to global
-    _ = global.setValue(
-        context,
-        v8.String.initUtf8(isolate, "crypto"),
-        crypto_obj,
-    );
+    js.addGlobalObj(global, context, isolate, "crypto", crypto_obj);
 }
 
 fn randomUUIDCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
+    const ctx = js.CallbackContext.init(raw_info);
 
     // Generate 16 random bytes
     var bytes: [16]u8 = undefined;
@@ -89,40 +48,38 @@ fn randomUUIDCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
         bytes[8],  bytes[9],
         bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
     }) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Failed to generate UUID").toValue());
+        js.throw(ctx.isolate, "Failed to generate UUID");
         return;
     };
 
-    info.getReturnValue().set(v8.String.initUtf8(isolate, &uuid_buf).toValue());
+    js.retString(ctx, &uuid_buf);
 }
 
 fn getRandomValuesCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "getRandomValues requires a TypedArray argument").toValue());
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "getRandomValues requires a TypedArray argument");
         return;
     }
 
-    const arg = info.getArg(0);
+    const arg = ctx.arg(0);
 
     if (!arg.isArrayBufferView()) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "getRandomValues requires a TypedArray argument").toValue());
+        js.throw(ctx.isolate, "getRandomValues requires a TypedArray argument");
         return;
     }
 
-    // Get the view and fill with random bytes
-    const view = v8.ArrayBufferView{ .handle = @ptrCast(arg.handle) };
+    const view = js.asArrayBufferView(arg);
     const len = view.getByteLength();
 
     if (len > 65536) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "getRandomValues: quota exceeded (max 65536 bytes)").toValue());
+        js.throw(ctx.isolate, "getRandomValues: quota exceeded (max 65536 bytes)");
         return;
     }
 
     // Create new random data and return new array
-    const backing = v8.BackingStore.init(isolate, len);
+    const backing = v8.BackingStore.init(ctx.isolate, len);
     const data = backing.getData();
 
     if (data) |ptr| {
@@ -131,62 +88,56 @@ fn getRandomValuesCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv
     }
 
     const shared_ptr = backing.toSharedPtr();
-    const array_buffer = v8.ArrayBuffer.initWithBackingStore(isolate, &shared_ptr);
+    const array_buffer = v8.ArrayBuffer.initWithBackingStore(ctx.isolate, &shared_ptr);
     const uint8_array = v8.Uint8Array.init(array_buffer, 0, len);
-    info.getReturnValue().set(uint8_array.toValue());
+    js.ret(ctx, uint8_array);
 }
 
 fn digestCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 2) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "digest requires algorithm and data arguments").toValue());
+    if (ctx.argc() < 2) {
+        js.throw(ctx.isolate, "digest requires algorithm and data arguments");
         return;
     }
 
     // Get algorithm name
-    const algo_arg = info.getArg(0);
-    const algo_str = algo_arg.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "digest: invalid algorithm").toValue());
+    const algo_str = ctx.arg(0).toString(ctx.context) catch {
+        js.throw(ctx.isolate, "digest: invalid algorithm");
         return;
     };
 
     var algo_buf: [32]u8 = undefined;
-    const algo_len = algo_str.writeUtf8(isolate, &algo_buf);
-    const algo = algo_buf[0..algo_len];
+    const algo = js.readString(ctx.isolate, algo_str, &algo_buf);
 
-    // Get data as string (TypedArray/ArrayBuffer input not yet supported)
-    const data_arg = info.getArg(1);
-    const data_str = data_arg.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "digest: invalid data").toValue());
+    // Get data as string
+    const data_str = ctx.arg(1).toString(ctx.context) catch {
+        js.throw(ctx.isolate, "digest: invalid data");
         return;
     };
 
     var data_buf: [8192]u8 = undefined;
-    const data_len = data_str.writeUtf8(isolate, &data_buf);
-    const data = data_buf[0..data_len];
+    const data = js.readString(ctx.isolate, data_str, &data_buf);
 
     // Compute hash based on algorithm
     if (std.mem.eql(u8, algo, "SHA-256") or std.mem.eql(u8, algo, "sha-256")) {
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(isolate, info, &hash);
+        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
     } else if (std.mem.eql(u8, algo, "SHA-384") or std.mem.eql(u8, algo, "sha-384")) {
         var hash: [48]u8 = undefined;
         std.crypto.hash.sha2.Sha384.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(isolate, info, &hash);
+        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
     } else if (std.mem.eql(u8, algo, "SHA-512") or std.mem.eql(u8, algo, "sha-512")) {
         var hash: [64]u8 = undefined;
         std.crypto.hash.sha2.Sha512.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(isolate, info, &hash);
+        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
     } else if (std.mem.eql(u8, algo, "SHA-1") or std.mem.eql(u8, algo, "sha-1")) {
         var hash: [20]u8 = undefined;
         std.crypto.hash.Sha1.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(isolate, info, &hash);
+        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
     } else {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "digest: unsupported algorithm").toValue());
+        js.throw(ctx.isolate, "digest: unsupported algorithm");
         return;
     }
 }
@@ -206,81 +157,72 @@ fn returnHashAsArrayBuffer(isolate: v8.Isolate, info: v8.FunctionCallbackInfo, h
 }
 
 /// crypto.subtle.sign(algorithm, key, data)
-/// Supports HMAC with SHA-256, SHA-384, SHA-512
 fn signCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 3) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "sign requires algorithm, key, and data arguments").toValue());
+    if (ctx.argc() < 3) {
+        js.throw(ctx.isolate, "sign requires algorithm, key, and data arguments");
         return;
     }
 
     // Parse algorithm
-    const algo_arg = info.getArg(0);
+    const algo_arg = ctx.arg(0);
     var hash_algo: []const u8 = "SHA-256";
 
     if (algo_arg.isObject()) {
-        const algo_obj = v8.Object{ .handle = @ptrCast(algo_arg.handle) };
-        const hash_val = algo_obj.getValue(context, v8.String.initUtf8(isolate, "hash")) catch null;
+        const algo_obj = js.asObject(algo_arg);
+        const hash_val = js.getProp(algo_obj, ctx.context, ctx.isolate, "hash") catch null;
         if (hash_val) |hv| {
-            const hash_str = hv.toString(context) catch null;
+            const hash_str = hv.toString(ctx.context) catch null;
             if (hash_str) |hs| {
                 var hash_buf: [32]u8 = undefined;
-                const hash_len = hs.writeUtf8(isolate, &hash_buf);
-                hash_algo = hash_buf[0..hash_len];
+                hash_algo = js.readString(ctx.isolate, hs, &hash_buf);
             }
         }
     } else if (algo_arg.isString()) {
-        // Simple algorithm name
-        const algo_str = algo_arg.toString(context) catch {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "sign: invalid algorithm").toValue());
+        const algo_str = algo_arg.toString(ctx.context) catch {
+            js.throw(ctx.isolate, "sign: invalid algorithm");
             return;
         };
         var algo_buf: [32]u8 = undefined;
-        const algo_len = algo_str.writeUtf8(isolate, &algo_buf);
-        hash_algo = algo_buf[0..algo_len];
+        hash_algo = js.readString(ctx.isolate, algo_str, &algo_buf);
     }
 
-    // Get key (as string for simplicity - Web Crypto uses CryptoKey)
-    const key_arg = info.getArg(1);
+    // Get key
+    const key_arg = ctx.arg(1);
     var key_buf: [256]u8 = undefined;
     var key_len: usize = 0;
 
     if (key_arg.isObject()) {
-        // Try to get raw key from object
-        const key_obj = v8.Object{ .handle = @ptrCast(key_arg.handle) };
-        const raw_val = key_obj.getValue(context, v8.String.initUtf8(isolate, "raw")) catch null;
+        const key_obj = js.asObject(key_arg);
+        const raw_val = js.getProp(key_obj, ctx.context, ctx.isolate, "raw") catch null;
         if (raw_val) |rv| {
-            const key_str = rv.toString(context) catch {
-                _ = isolate.throwException(v8.String.initUtf8(isolate, "sign: invalid key").toValue());
+            const key_str = rv.toString(ctx.context) catch {
+                js.throw(ctx.isolate, "sign: invalid key");
                 return;
             };
-            key_len = key_str.writeUtf8(isolate, &key_buf);
+            key_len = key_str.writeUtf8(ctx.isolate, &key_buf);
         } else {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "sign: key must have 'raw' property").toValue());
+            js.throw(ctx.isolate, "sign: key must have 'raw' property");
             return;
         }
     } else {
-        const key_str = key_arg.toString(context) catch {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "sign: invalid key").toValue());
+        const key_str = key_arg.toString(ctx.context) catch {
+            js.throw(ctx.isolate, "sign: invalid key");
             return;
         };
-        key_len = key_str.writeUtf8(isolate, &key_buf);
+        key_len = key_str.writeUtf8(ctx.isolate, &key_buf);
     }
     const key = key_buf[0..key_len];
 
     // Get data
-    const data_arg = info.getArg(2);
-    const data_str = data_arg.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "sign: invalid data").toValue());
+    const data_str = ctx.arg(2).toString(ctx.context) catch {
+        js.throw(ctx.isolate, "sign: invalid data");
         return;
     };
 
     var data_buf: [8192]u8 = undefined;
-    const data_len = data_str.writeUtf8(isolate, &data_buf);
-    const data = data_buf[0..data_len];
+    const data = js.readString(ctx.isolate, data_str, &data_buf);
 
     // Compute HMAC based on hash algorithm
     if (std.mem.eql(u8, hash_algo, "SHA-256") or std.mem.eql(u8, hash_algo, "sha-256") or std.mem.eql(u8, hash_algo, "HMAC")) {
@@ -288,96 +230,91 @@ fn signCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         var hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(key);
         hmac.update(data);
         hmac.final(&mac);
-        returnHashAsArrayBuffer(isolate, info, &mac);
+        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &mac);
     } else if (std.mem.eql(u8, hash_algo, "SHA-384") or std.mem.eql(u8, hash_algo, "sha-384")) {
         var mac: [48]u8 = undefined;
         var hmac = std.crypto.auth.hmac.sha2.HmacSha384.init(key);
         hmac.update(data);
         hmac.final(&mac);
-        returnHashAsArrayBuffer(isolate, info, &mac);
+        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &mac);
     } else if (std.mem.eql(u8, hash_algo, "SHA-512") or std.mem.eql(u8, hash_algo, "sha-512")) {
         var mac: [64]u8 = undefined;
         var hmac = std.crypto.auth.hmac.sha2.HmacSha512.init(key);
         hmac.update(data);
         hmac.final(&mac);
-        returnHashAsArrayBuffer(isolate, info, &mac);
+        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &mac);
     } else {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "sign: unsupported algorithm (use HMAC with SHA-256/384/512)").toValue());
+        js.throw(ctx.isolate, "sign: unsupported algorithm (use HMAC with SHA-256/384/512)");
         return;
     }
 }
 
 /// crypto.subtle.verify(algorithm, key, signature, data)
-/// Verifies HMAC signature
 fn verifyCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 4) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "verify requires algorithm, key, signature, and data arguments").toValue());
+    if (ctx.argc() < 4) {
+        js.throw(ctx.isolate, "verify requires algorithm, key, signature, and data arguments");
         return;
     }
 
-    // Parse algorithm (same as sign)
-    const algo_arg = info.getArg(0);
+    // Parse algorithm
+    const algo_arg = ctx.arg(0);
     var hash_algo: []const u8 = "SHA-256";
 
     if (algo_arg.isObject()) {
-        const algo_obj = v8.Object{ .handle = @ptrCast(algo_arg.handle) };
-        const hash_val = algo_obj.getValue(context, v8.String.initUtf8(isolate, "hash")) catch null;
+        const algo_obj = js.asObject(algo_arg);
+        const hash_val = js.getProp(algo_obj, ctx.context, ctx.isolate, "hash") catch null;
         if (hash_val) |hv| {
-            const hash_str = hv.toString(context) catch null;
+            const hash_str = hv.toString(ctx.context) catch null;
             if (hash_str) |hs| {
                 var hash_buf: [32]u8 = undefined;
-                const hash_len = hs.writeUtf8(isolate, &hash_buf);
-                hash_algo = hash_buf[0..hash_len];
+                hash_algo = js.readString(ctx.isolate, hs, &hash_buf);
             }
         }
     } else if (algo_arg.isString()) {
-        const algo_str = algo_arg.toString(context) catch {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "verify: invalid algorithm").toValue());
+        const algo_str = algo_arg.toString(ctx.context) catch {
+            js.throw(ctx.isolate, "verify: invalid algorithm");
             return;
         };
         var algo_buf: [32]u8 = undefined;
-        const algo_len = algo_str.writeUtf8(isolate, &algo_buf);
-        hash_algo = algo_buf[0..algo_len];
+        hash_algo = js.readString(ctx.isolate, algo_str, &algo_buf);
     }
 
     // Get key
-    const key_arg = info.getArg(1);
+    const key_arg = ctx.arg(1);
     var key_buf: [256]u8 = undefined;
     var key_len: usize = 0;
 
     if (key_arg.isObject()) {
-        const key_obj = v8.Object{ .handle = @ptrCast(key_arg.handle) };
-        const raw_val = key_obj.getValue(context, v8.String.initUtf8(isolate, "raw")) catch null;
+        const key_obj = js.asObject(key_arg);
+        const raw_val = js.getProp(key_obj, ctx.context, ctx.isolate, "raw") catch null;
         if (raw_val) |rv| {
-            const key_str = rv.toString(context) catch {
-                _ = isolate.throwException(v8.String.initUtf8(isolate, "verify: invalid key").toValue());
+            const key_str = rv.toString(ctx.context) catch {
+                js.throw(ctx.isolate, "verify: invalid key");
                 return;
             };
-            key_len = key_str.writeUtf8(isolate, &key_buf);
+            key_len = key_str.writeUtf8(ctx.isolate, &key_buf);
         } else {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "verify: key must have 'raw' property").toValue());
+            js.throw(ctx.isolate, "verify: key must have 'raw' property");
             return;
         }
     } else {
-        const key_str = key_arg.toString(context) catch {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "verify: invalid key").toValue());
+        const key_str = key_arg.toString(ctx.context) catch {
+            js.throw(ctx.isolate, "verify: invalid key");
             return;
         };
-        key_len = key_str.writeUtf8(isolate, &key_buf);
+        key_len = key_str.writeUtf8(ctx.isolate, &key_buf);
     }
     const key = key_buf[0..key_len];
 
     // Get signature
-    const sig_arg = info.getArg(2);
-    var sig_buf: [64]u8 = undefined; // Max size for SHA-512
+    const sig_arg = ctx.arg(2);
+    var sig_buf: [64]u8 = undefined;
     var sig_len: usize = 0;
 
     if (sig_arg.isArrayBuffer()) {
-        const ab = v8.ArrayBuffer{ .handle = @ptrCast(sig_arg.handle) };
+        const ab = js.asArrayBuffer(sig_arg);
         const ab_len = ab.getByteLength();
         const shared_ptr = ab.getBackingStore();
         const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
@@ -388,7 +325,7 @@ fn verifyCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
             @memcpy(sig_buf[0..sig_len], byte_ptr[0..sig_len]);
         }
     } else if (sig_arg.isArrayBufferView()) {
-        const view = v8.ArrayBufferView{ .handle = @ptrCast(sig_arg.handle) };
+        const view = js.asArrayBufferView(sig_arg);
         const ab = view.getBuffer();
         const ab_len = view.getByteLength();
         const shared_ptr = ab.getBackingStore();
@@ -401,21 +338,19 @@ fn verifyCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
             @memcpy(sig_buf[0..sig_len], byte_ptr[offset .. offset + sig_len]);
         }
     } else {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "verify: signature must be ArrayBuffer or TypedArray").toValue());
+        js.throw(ctx.isolate, "verify: signature must be ArrayBuffer or TypedArray");
         return;
     }
     const signature = sig_buf[0..sig_len];
 
     // Get data
-    const data_arg = info.getArg(3);
-    const data_str = data_arg.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "verify: invalid data").toValue());
+    const data_str = ctx.arg(3).toString(ctx.context) catch {
+        js.throw(ctx.isolate, "verify: invalid data");
         return;
     };
 
     var data_buf: [8192]u8 = undefined;
-    const data_len = data_str.writeUtf8(isolate, &data_buf);
-    const data = data_buf[0..data_len];
+    const data = js.readString(ctx.isolate, data_str, &data_buf);
 
     // Compute expected MAC and compare
     var result: bool = false;
@@ -446,5 +381,5 @@ fn verifyCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
         }
     }
 
-    info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, result).handle });
+    js.retBool(ctx, result);
 }

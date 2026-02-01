@@ -1,5 +1,6 @@
 const std = @import("std");
 const v8 = @import("v8");
+const js = @import("js");
 
 /// Register FormData API
 pub fn registerFormDataAPI(isolate: v8.Isolate, context: v8.Context) void {
@@ -9,444 +10,360 @@ pub fn registerFormDataAPI(isolate: v8.Isolate, context: v8.Context) void {
     const formdata_tmpl = v8.FunctionTemplate.initCallback(isolate, formDataConstructor);
     const formdata_proto = formdata_tmpl.getPrototypeTemplate();
 
-    // FormData.append(name, value, filename?)
-    const append_fn = v8.FunctionTemplate.initCallback(isolate, formDataAppend);
-    formdata_proto.set(v8.String.initUtf8(isolate, "append").toName(), append_fn, v8.PropertyAttribute.None);
+    js.addMethod(formdata_proto, isolate, "append", formDataAppend);
+    js.addMethod(formdata_proto, isolate, "delete", formDataDelete);
+    js.addMethod(formdata_proto, isolate, "get", formDataGet);
+    js.addMethod(formdata_proto, isolate, "getAll", formDataGetAll);
+    js.addMethod(formdata_proto, isolate, "has", formDataHas);
+    js.addMethod(formdata_proto, isolate, "set", formDataSet);
+    js.addMethod(formdata_proto, isolate, "entries", formDataEntries);
+    js.addMethod(formdata_proto, isolate, "keys", formDataKeys);
+    js.addMethod(formdata_proto, isolate, "values", formDataValues);
 
-    // FormData.delete(name)
-    const delete_fn = v8.FunctionTemplate.initCallback(isolate, formDataDelete);
-    formdata_proto.set(v8.String.initUtf8(isolate, "delete").toName(), delete_fn, v8.PropertyAttribute.None);
-
-    // FormData.get(name)
-    const get_fn = v8.FunctionTemplate.initCallback(isolate, formDataGet);
-    formdata_proto.set(v8.String.initUtf8(isolate, "get").toName(), get_fn, v8.PropertyAttribute.None);
-
-    // FormData.getAll(name)
-    const getall_fn = v8.FunctionTemplate.initCallback(isolate, formDataGetAll);
-    formdata_proto.set(v8.String.initUtf8(isolate, "getAll").toName(), getall_fn, v8.PropertyAttribute.None);
-
-    // FormData.has(name)
-    const has_fn = v8.FunctionTemplate.initCallback(isolate, formDataHas);
-    formdata_proto.set(v8.String.initUtf8(isolate, "has").toName(), has_fn, v8.PropertyAttribute.None);
-
-    // FormData.set(name, value, filename?)
-    const set_fn = v8.FunctionTemplate.initCallback(isolate, formDataSet);
-    formdata_proto.set(v8.String.initUtf8(isolate, "set").toName(), set_fn, v8.PropertyAttribute.None);
-
-    // FormData.entries()
-    const entries_fn = v8.FunctionTemplate.initCallback(isolate, formDataEntries);
-    formdata_proto.set(v8.String.initUtf8(isolate, "entries").toName(), entries_fn, v8.PropertyAttribute.None);
-
-    // FormData.keys()
-    const keys_fn = v8.FunctionTemplate.initCallback(isolate, formDataKeys);
-    formdata_proto.set(v8.String.initUtf8(isolate, "keys").toName(), keys_fn, v8.PropertyAttribute.None);
-
-    // FormData.values()
-    const values_fn = v8.FunctionTemplate.initCallback(isolate, formDataValues);
-    formdata_proto.set(v8.String.initUtf8(isolate, "values").toName(), values_fn, v8.PropertyAttribute.None);
-
-    _ = global.setValue(
-        context,
-        v8.String.initUtf8(isolate, "FormData"),
-        formdata_tmpl.getFunction(context),
-    );
+    js.addGlobalClass(global, context, isolate, "FormData", formdata_tmpl);
 }
 
-// === FormData implementation ===
-// Uses a simple object to store key-value pairs
-// Keys map to arrays of values (for multiple values with same name)
-
 fn formDataConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
     // Create internal storage object
-    const storage = isolate.initObjectTemplateDefault().initInstance(context);
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_storage"), v8.Value{ .handle = @ptrCast(storage.handle) });
+    const storage = js.object(ctx.isolate, ctx.context);
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_storage", storage);
 
     // Track key order for iteration
-    const keys_arr = v8.Array.init(isolate, 0);
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_keys"), v8.Value{ .handle = @ptrCast(keys_arr.handle) });
+    const keys_arr = js.array(ctx.isolate, 0);
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_keys", keys_arr);
 }
 
 fn formDataAppend(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 2) return;
+    if (ctx.argc() < 2) return;
 
-    const name_arg = info.getArg(0);
-    const value_arg = info.getArg(1);
+    const name_str = ctx.arg(0).toString(ctx.context) catch return;
+    const value_arg = ctx.arg(1);
 
-    // Get name as string
-    const name_str = name_arg.toString(context) catch return;
     var name_buf: [256]u8 = undefined;
-    const name_len = name_str.writeUtf8(isolate, &name_buf);
-    const name = name_buf[0..name_len];
+    const name = js.readString(ctx.isolate, name_str, &name_buf);
 
     // Get storage
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch return;
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch return;
     if (!storage_val.isObject()) return;
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
     // Get or create array for this key
-    const existing = storage.getValue(context, v8.String.initUtf8(isolate, name)) catch null;
+    const existing = js.getProp(storage, ctx.context, ctx.isolate, name) catch null;
     var arr: v8.Array = undefined;
     if (existing == null or existing.?.isUndefined()) {
-        arr = v8.Array.init(isolate, 0);
-        _ = storage.setValue(context, v8.String.initUtf8(isolate, name), v8.Value{ .handle = @ptrCast(arr.handle) });
+        arr = js.array(ctx.isolate, 0);
+        _ = js.setProp(storage, ctx.context, ctx.isolate, name, arr);
 
         // Add to keys list
-        const keys_val = this.getValue(context, v8.String.initUtf8(isolate, "_keys")) catch return;
+        const keys_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_keys") catch return;
         if (keys_val.isArray()) {
-            const keys_arr = v8.Array{ .handle = @ptrCast(keys_val.handle) };
+            const keys_arr = js.asArray(keys_val);
             const len = keys_arr.length();
-            _ = keys_arr.castTo(v8.Object).setValueAtIndex(context, len, name_str.toValue());
+            _ = js.setIndex(keys_arr.castTo(v8.Object), ctx.context, len, name_str.toValue());
         }
     } else {
-        arr = v8.Array{ .handle = @ptrCast(existing.?.handle) };
+        arr = js.asArray(existing.?);
     }
 
     // Append value
     const len = arr.length();
-    _ = arr.castTo(v8.Object).setValueAtIndex(context, len, value_arg);
+    _ = js.setIndex(arr.castTo(v8.Object), ctx.context, len, value_arg);
 }
 
 fn formDataDelete(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) return;
+    if (ctx.argc() < 1) return;
 
-    const name_arg = info.getArg(0);
-    const name_str = name_arg.toString(context) catch return;
+    const name_str = ctx.arg(0).toString(ctx.context) catch return;
     var name_buf: [256]u8 = undefined;
-    const name_len = name_str.writeUtf8(isolate, &name_buf);
-    const name = name_buf[0..name_len];
+    const name = js.readString(ctx.isolate, name_str, &name_buf);
 
     // Get storage and delete key
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch return;
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch return;
     if (!storage_val.isObject()) return;
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
-    // Set to undefined to "delete"
-    _ = storage.setValue(context, v8.String.initUtf8(isolate, name), isolate.initUndefined().toValue());
+    _ = js.setProp(storage, ctx.context, ctx.isolate, name, js.undefined_(ctx.isolate));
 }
 
 fn formDataGet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    if (ctx.argc() < 1) {
+        js.retNull(ctx);
         return;
     }
 
-    const name_arg = info.getArg(0);
-    const name_str = name_arg.toString(context) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    const name_str = ctx.arg(0).toString(ctx.context) catch {
+        js.retNull(ctx);
         return;
     };
     var name_buf: [256]u8 = undefined;
-    const name_len = name_str.writeUtf8(isolate, &name_buf);
-    const name = name_buf[0..name_len];
+    const name = js.readString(ctx.isolate, name_str, &name_buf);
 
     // Get storage
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch {
+        js.retNull(ctx);
         return;
     };
     if (!storage_val.isObject()) {
-        info.getReturnValue().set(isolate.initNull().toValue());
+        js.retNull(ctx);
         return;
     }
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
     // Get array for this key
-    const arr_val = storage.getValue(context, v8.String.initUtf8(isolate, name)) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    const arr_val = js.getProp(storage, ctx.context, ctx.isolate, name) catch {
+        js.retNull(ctx);
         return;
     };
 
     if (arr_val.isUndefined() or !arr_val.isArray()) {
-        info.getReturnValue().set(isolate.initNull().toValue());
+        js.retNull(ctx);
         return;
     }
 
-    const arr = v8.Array{ .handle = @ptrCast(arr_val.handle) };
+    const arr = js.asArray(arr_val);
     if (arr.length() == 0) {
-        info.getReturnValue().set(isolate.initNull().toValue());
+        js.retNull(ctx);
         return;
     }
 
     // Return first value
-    const first = arr.castTo(v8.Object).getAtIndex(context, 0) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
+    const first = js.getIndex(arr.castTo(v8.Object), ctx.context, 0) catch {
+        js.retNull(ctx);
         return;
     };
-    info.getReturnValue().set(first);
+    js.ret(ctx, first);
 }
 
 fn formDataGetAll(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(v8.Array.init(isolate, 0).handle) });
+    if (ctx.argc() < 1) {
+        js.retEmptyArray(ctx);
         return;
     }
 
-    const name_arg = info.getArg(0);
-    const name_str = name_arg.toString(context) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(v8.Array.init(isolate, 0).handle) });
+    const name_str = ctx.arg(0).toString(ctx.context) catch {
+        js.retEmptyArray(ctx);
         return;
     };
     var name_buf: [256]u8 = undefined;
-    const name_len = name_str.writeUtf8(isolate, &name_buf);
-    const name = name_buf[0..name_len];
+    const name = js.readString(ctx.isolate, name_str, &name_buf);
 
     // Get storage
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(v8.Array.init(isolate, 0).handle) });
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch {
+        js.retEmptyArray(ctx);
         return;
     };
     if (!storage_val.isObject()) {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(v8.Array.init(isolate, 0).handle) });
+        js.retEmptyArray(ctx);
         return;
     }
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
     // Get array for this key
-    const arr_val = storage.getValue(context, v8.String.initUtf8(isolate, name)) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(v8.Array.init(isolate, 0).handle) });
+    const arr_val = js.getProp(storage, ctx.context, ctx.isolate, name) catch {
+        js.retEmptyArray(ctx);
         return;
     };
 
     if (arr_val.isUndefined() or !arr_val.isArray()) {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(v8.Array.init(isolate, 0).handle) });
+        js.retEmptyArray(ctx);
         return;
     }
 
-    info.getReturnValue().set(arr_val);
+    js.ret(ctx, arr_val);
 }
 
 fn formDataHas(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 1) {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    if (ctx.argc() < 1) {
+        js.retBool(ctx, false);
         return;
     }
 
-    const name_arg = info.getArg(0);
-    const name_str = name_arg.toString(context) catch {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    const name_str = ctx.arg(0).toString(ctx.context) catch {
+        js.retBool(ctx, false);
         return;
     };
     var name_buf: [256]u8 = undefined;
-    const name_len = name_str.writeUtf8(isolate, &name_buf);
-    const name = name_buf[0..name_len];
+    const name = js.readString(ctx.isolate, name_str, &name_buf);
 
     // Get storage
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch {
+        js.retBool(ctx, false);
         return;
     };
     if (!storage_val.isObject()) {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+        js.retBool(ctx, false);
         return;
     }
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
     // Check if key exists
-    const arr_val = storage.getValue(context, v8.String.initUtf8(isolate, name)) catch {
-        info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, false).handle });
+    const arr_val = js.getProp(storage, ctx.context, ctx.isolate, name) catch {
+        js.retBool(ctx, false);
         return;
     };
 
     const has = !arr_val.isUndefined() and arr_val.isArray();
-    info.getReturnValue().set(v8.Value{ .handle = v8.Boolean.init(isolate, has).handle });
+    js.retBool(ctx, has);
 }
 
 fn formDataSet(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    if (info.length() < 2) return;
+    if (ctx.argc() < 2) return;
 
-    const name_arg = info.getArg(0);
-    const value_arg = info.getArg(1);
+    const name_str = ctx.arg(0).toString(ctx.context) catch return;
+    const value_arg = ctx.arg(1);
 
-    // Get name as string
-    const name_str = name_arg.toString(context) catch return;
     var name_buf: [256]u8 = undefined;
-    const name_len = name_str.writeUtf8(isolate, &name_buf);
-    const name = name_buf[0..name_len];
+    const name = js.readString(ctx.isolate, name_str, &name_buf);
 
     // Get storage
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch return;
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch return;
     if (!storage_val.isObject()) return;
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
     // Check if key already exists
-    const existing = storage.getValue(context, v8.String.initUtf8(isolate, name)) catch null;
+    const existing = js.getProp(storage, ctx.context, ctx.isolate, name) catch null;
     const is_new = (existing == null or existing.?.isUndefined());
 
     // Create new array with single value
-    const arr = v8.Array.init(isolate, 1);
-    _ = arr.castTo(v8.Object).setValueAtIndex(context, 0, value_arg);
-    _ = storage.setValue(context, v8.String.initUtf8(isolate, name), v8.Value{ .handle = @ptrCast(arr.handle) });
+    const arr = js.array(ctx.isolate, 1);
+    _ = js.setIndex(arr.castTo(v8.Object), ctx.context, 0, value_arg);
+    _ = js.setProp(storage, ctx.context, ctx.isolate, name, arr);
 
     // Add to keys list if new
     if (is_new) {
-        const keys_val = this.getValue(context, v8.String.initUtf8(isolate, "_keys")) catch return;
+        const keys_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_keys") catch return;
         if (keys_val.isArray()) {
-            const keys_arr = v8.Array{ .handle = @ptrCast(keys_val.handle) };
+            const keys_arr = js.asArray(keys_val);
             const len = keys_arr.length();
-            _ = keys_arr.castTo(v8.Object).setValueAtIndex(context, len, name_str.toValue());
+            _ = js.setIndex(keys_arr.castTo(v8.Object), ctx.context, len, name_str.toValue());
         }
     }
 }
 
 fn formDataEntries(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    // Return array of [key, value] pairs (simplified - not a true iterator)
-    const result = v8.Array.init(isolate, 0);
+    const result = js.array(ctx.isolate, 0);
 
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch {
+        js.ret(ctx, result);
         return;
     };
     if (!storage_val.isObject()) {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+        js.ret(ctx, result);
         return;
     }
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
-    const keys_val = this.getValue(context, v8.String.initUtf8(isolate, "_keys")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+    const keys_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_keys") catch {
+        js.ret(ctx, result);
         return;
     };
     if (!keys_val.isArray()) {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+        js.ret(ctx, result);
         return;
     }
-    const keys_arr = v8.Array{ .handle = @ptrCast(keys_val.handle) };
+    const keys_arr = js.asArray(keys_val);
     const keys_len = keys_arr.length();
 
     var result_idx: u32 = 0;
     var i: u32 = 0;
     while (i < keys_len) : (i += 1) {
-        const key = keys_arr.castTo(v8.Object).getAtIndex(context, i) catch continue;
-        const key_str = key.toString(context) catch continue;
+        const key = js.getIndex(keys_arr.castTo(v8.Object), ctx.context, i) catch continue;
+        const key_str = key.toString(ctx.context) catch continue;
         var key_buf: [256]u8 = undefined;
-        const key_len = key_str.writeUtf8(isolate, &key_buf);
-        const key_name = key_buf[0..key_len];
+        const key_name = js.readString(ctx.isolate, key_str, &key_buf);
 
-        const values_val = storage.getValue(context, v8.String.initUtf8(isolate, key_name)) catch continue;
+        const values_val = js.getProp(storage, ctx.context, ctx.isolate, key_name) catch continue;
         if (!values_val.isArray()) continue;
-        const values_arr = v8.Array{ .handle = @ptrCast(values_val.handle) };
+        const values_arr = js.asArray(values_val);
         const values_len = values_arr.length();
 
         var j: u32 = 0;
         while (j < values_len) : (j += 1) {
-            const val = values_arr.castTo(v8.Object).getAtIndex(context, j) catch continue;
+            const val = js.getIndex(values_arr.castTo(v8.Object), ctx.context, j) catch continue;
 
-            // Create [key, value] pair
-            const pair = v8.Array.init(isolate, 2);
-            _ = pair.castTo(v8.Object).setValueAtIndex(context, 0, key);
-            _ = pair.castTo(v8.Object).setValueAtIndex(context, 1, val);
-            _ = result.castTo(v8.Object).setValueAtIndex(context, result_idx, v8.Value{ .handle = @ptrCast(pair.handle) });
+            const pair = js.array(ctx.isolate, 2);
+            _ = js.setIndex(pair.castTo(v8.Object), ctx.context, 0, key);
+            _ = js.setIndex(pair.castTo(v8.Object), ctx.context, 1, val);
+            _ = js.setIndex(result.castTo(v8.Object), ctx.context, result_idx, js.arrayToValue(pair));
             result_idx += 1;
         }
     }
 
-    info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+    js.ret(ctx, result);
 }
 
 fn formDataKeys(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    const keys_val = this.getValue(context, v8.String.initUtf8(isolate, "_keys")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(v8.Array.init(isolate, 0).handle) });
+    const keys_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_keys") catch {
+        js.retEmptyArray(ctx);
         return;
     };
-    info.getReturnValue().set(keys_val);
+    js.ret(ctx, keys_val);
 }
 
 fn formDataValues(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
-    const isolate = info.getIsolate();
-    const context = isolate.getCurrentContext();
-    const this = info.getThis();
+    const ctx = js.CallbackContext.init(raw_info);
 
-    // Collect all values
-    const result = v8.Array.init(isolate, 0);
+    const result = js.array(ctx.isolate, 0);
 
-    const storage_val = this.getValue(context, v8.String.initUtf8(isolate, "_storage")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+    const storage_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_storage") catch {
+        js.ret(ctx, result);
         return;
     };
     if (!storage_val.isObject()) {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+        js.ret(ctx, result);
         return;
     }
-    const storage = v8.Object{ .handle = @ptrCast(storage_val.handle) };
+    const storage = js.asObject(storage_val);
 
-    const keys_val = this.getValue(context, v8.String.initUtf8(isolate, "_keys")) catch {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+    const keys_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_keys") catch {
+        js.ret(ctx, result);
         return;
     };
     if (!keys_val.isArray()) {
-        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+        js.ret(ctx, result);
         return;
     }
-    const keys_arr = v8.Array{ .handle = @ptrCast(keys_val.handle) };
+    const keys_arr = js.asArray(keys_val);
     const keys_len = keys_arr.length();
 
     var result_idx: u32 = 0;
     var i: u32 = 0;
     while (i < keys_len) : (i += 1) {
-        const key = keys_arr.castTo(v8.Object).getAtIndex(context, i) catch continue;
-        const key_str = key.toString(context) catch continue;
+        const key = js.getIndex(keys_arr.castTo(v8.Object), ctx.context, i) catch continue;
+        const key_str = key.toString(ctx.context) catch continue;
         var key_buf: [256]u8 = undefined;
-        const key_len = key_str.writeUtf8(isolate, &key_buf);
-        const key_name = key_buf[0..key_len];
+        const key_name = js.readString(ctx.isolate, key_str, &key_buf);
 
-        const values_val = storage.getValue(context, v8.String.initUtf8(isolate, key_name)) catch continue;
+        const values_val = js.getProp(storage, ctx.context, ctx.isolate, key_name) catch continue;
         if (!values_val.isArray()) continue;
-        const values_arr = v8.Array{ .handle = @ptrCast(values_val.handle) };
+        const values_arr = js.asArray(values_val);
         const values_len = values_arr.length();
 
         var j: u32 = 0;
         while (j < values_len) : (j += 1) {
-            const val = values_arr.castTo(v8.Object).getAtIndex(context, j) catch continue;
-            _ = result.castTo(v8.Object).setValueAtIndex(context, result_idx, val);
+            const val = js.getIndex(values_arr.castTo(v8.Object), ctx.context, j) catch continue;
+            _ = js.setIndex(result.castTo(v8.Object), ctx.context, result_idx, val);
             result_idx += 1;
         }
     }
 
-    info.getReturnValue().set(v8.Value{ .handle = @ptrCast(result.handle) });
+    js.ret(ctx, result);
 }

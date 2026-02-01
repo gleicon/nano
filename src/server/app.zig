@@ -107,6 +107,58 @@ pub const App = struct {
     }
 };
 
+/// Transform "export default X" to "__default = X" for ESM compatibility
+/// This allows using standard JavaScript module syntax
+fn transformExportDefault(allocator: std.mem.Allocator, source: []const u8) ![]const u8 {
+    // Find "export default" and replace with "__default ="
+    const pattern = "export default";
+    const replacement = "__default =";
+
+    // Count occurrences to calculate new size
+    var count: usize = 0;
+    var pos: usize = 0;
+    while (pos < source.len) {
+        if (std.mem.indexOf(u8, source[pos..], pattern)) |idx| {
+            count += 1;
+            pos += idx + pattern.len;
+        } else {
+            break;
+        }
+    }
+
+    if (count == 0) {
+        // No transformation needed, return original
+        return source;
+    }
+
+    // Calculate new size (replacement is shorter, but allocate same size for safety)
+    const new_size = source.len - (count * (pattern.len - replacement.len));
+    const result = try allocator.alloc(u8, new_size);
+
+    // Perform replacement
+    var write_pos: usize = 0;
+    var read_pos: usize = 0;
+    while (read_pos < source.len) {
+        if (std.mem.indexOf(u8, source[read_pos..], pattern)) |idx| {
+            // Copy everything before the pattern
+            @memcpy(result[write_pos .. write_pos + idx], source[read_pos .. read_pos + idx]);
+            write_pos += idx;
+            // Write replacement
+            @memcpy(result[write_pos .. write_pos + replacement.len], replacement);
+            write_pos += replacement.len;
+            read_pos += idx + pattern.len;
+        } else {
+            // Copy remaining
+            const remaining = source.len - read_pos;
+            @memcpy(result[write_pos .. write_pos + remaining], source[read_pos..]);
+            write_pos += remaining;
+            break;
+        }
+    }
+
+    return result[0..write_pos];
+}
+
 /// Load an app from a folder path and compile the script
 pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allocator: ArrayBufferAllocator) !App {
     // Build path to index.js
@@ -180,12 +232,16 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
     };
     defer allocator.free(wrapped_source_buf);
 
+    // Transform "export default" to "__default =" for ESM compatibility
+    const transformed_source = transformExportDefault(allocator, source) catch source;
+    defer if (transformed_source.ptr != source.ptr) allocator.free(transformed_source);
+
     const wrapped_source = std.fmt.bufPrint(wrapped_source_buf,
         \\(function() {{
         \\  var __exports = {{}};
         \\  var __default = null;
         \\
-        \\  // Simulate export default
+        \\  // Support both "export default" (transformed) and legacy "__setDefault"
         \\  globalThis.__setDefault = function(obj) {{ __default = obj; }};
         \\
         \\  // User script
@@ -193,7 +249,7 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
         \\
         \\  return __default || __exports;
         \\}})()
-    , .{source}) catch {
+    , .{transformed_source}) catch {
         context.exit();
         handle_scope.deinit();
         isolate.exit();

@@ -1,7 +1,7 @@
 // App B - Multi-app config test
 // Returns different app identifier
 
-__setDefault({
+export default {
   fetch(request) {
     const url = new URL(request.url());
     return new Response(JSON.stringify({

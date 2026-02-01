@@ -96,9 +96,23 @@ pub const HttpServer = struct {
         while (self.running) {
             // Accept connection
             const conn = self.server.accept() catch |err| {
+                // If we're shutting down, any error is expected (socket was closed)
+                if (!self.running) break;
+
+                // Handle signal interruption (EINTR)
+                if (err == error.Interrupted) continue;
+
+                // Handle connection-level errors that don't stop the server
                 if (err == error.ConnectionAborted) continue;
+
                 return err;
             };
+
+            // Double-check running flag after accept returns
+            if (!self.running) {
+                conn.stream.close();
+                break;
+            }
 
             // Handle the request
             self.handleConnection(conn) catch |err| {
@@ -245,6 +259,14 @@ pub const HttpServer = struct {
 
     pub fn stop(self: *HttpServer) void {
         self.running = false;
+
+        // Unblock accept() by making a dummy connection to ourselves
+        // This is a classic pattern - more reliable than shutdown() on listening sockets
+        const wake_conn = std.net.tcpConnectToAddress(self.address) catch null;
+        if (wake_conn) |conn| {
+            conn.close();
+        }
+
         var logger = log.stdout();
         logger.info("server_stop", .{
             .requests = self.metrics.request_count,
