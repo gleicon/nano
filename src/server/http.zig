@@ -647,11 +647,37 @@ pub const HttpServer = struct {
         return .{ .status = status, .body_len = body.len };
     }
 
-    /// Stub for handleListApps - will be implemented in Task 2
+    /// GET /admin/apps - List all loaded apps with stats
     fn handleListApps(self: *HttpServer, conn: std.net.Server.Connection) AdminResult {
-        _ = self;
-        _ = conn;
-        return .{ .status = 501, .body_len = 0 };
+        var buf: [8192]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&buf);
+        const writer = fbs.writer();
+
+        writer.writeAll("{\"apps\":[") catch return self.sendAdminResponse(conn, 500, "{\"error\":\"Buffer overflow\"}");
+
+        var first = true;
+        var iter = self.apps.iterator();
+        while (iter.next()) |entry| {
+            if (!first) writer.writeAll(",") catch {};
+            first = false;
+
+            const app_ptr = entry.value_ptr.*;
+            const memory_pct = app_ptr.getMemoryUsagePercent();
+
+            // Manual JSON building (simpler than std.json for this case)
+            std.fmt.format(writer, "{{\"hostname\":\"{s}\",\"path\":\"{s}\",\"memory_percent\":{d:.1},\"timeout_ms\":{d}}}", .{
+                entry.key_ptr.*,
+                app_ptr.app_path,
+                memory_pct,
+                app_ptr.timeout_ms,
+            }) catch {};
+        }
+
+        writer.writeAll("]}") catch {};
+
+        const json_body = fbs.getWritten();
+        self.sendResponse(conn, 200, "application/json", json_body) catch {};
+        return .{ .status = 200, .body_len = json_body.len };
     }
 
     /// Stub for handleAddApp - will be implemented in Task 3
