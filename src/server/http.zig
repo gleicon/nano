@@ -4,7 +4,9 @@ const v8 = @import("v8");
 const app_module = @import("app");
 const log = @import("log");
 const metrics_mod = @import("metrics");
-const EventLoop = @import("event_loop").EventLoop;
+const event_loop_mod = @import("event_loop");
+const EventLoop = event_loop_mod.EventLoop;
+const ConfigWatcher = event_loop_mod.ConfigWatcher;
 const timers = @import("timers");
 const config_mod = @import("config");
 
@@ -27,6 +29,9 @@ pub const HttpServer = struct {
     request_counter: u64,
     metrics: metrics_mod.Metrics,
     event_loop: EventLoop,
+    // Config file watching for hot reload
+    config_path: ?[]const u8,
+    config_watcher: ?ConfigWatcher,
 
     pub fn init(port: u16, allocator: std.mem.Allocator) !HttpServer {
         const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
@@ -59,6 +64,8 @@ pub const HttpServer = struct {
             .request_counter = 0,
             .metrics = metrics_mod.Metrics.init(),
             .event_loop = event_loop,
+            .config_path = null,
+            .config_watcher = null,
         };
     }
 
@@ -124,7 +131,195 @@ pub const HttpServer = struct {
         });
     }
 
+    /// Start watching config file for changes (hot reload)
+    pub fn startConfigWatcher(self: *HttpServer, path: []const u8) !void {
+        var logger = log.stdout();
+
+        // Store config path (dupe it since original may be freed)
+        self.config_path = try self.allocator.dupe(u8, path);
+
+        // Initialize config watcher with callback to reloadConfigCallback
+        self.config_watcher = try ConfigWatcher.init(
+            self.config_path.?,
+            @ptrCast(self),
+            reloadConfigCallback,
+        );
+
+        // Start the watcher on the event loop
+        self.config_watcher.?.start(&self.event_loop.loop);
+
+        logger.info("config_watcher_started", .{
+            .path = path,
+            .poll_interval_ms = 2000,
+        });
+    }
+
+    /// Callback invoked by ConfigWatcher when config file changes
+    fn reloadConfigCallback(server_ptr: *anyopaque) void {
+        const self: *HttpServer = @ptrCast(@alignCast(server_ptr));
+        self.reloadConfig() catch |err| {
+            var logger = log.stderr();
+            logger.err("config_reload_failed", .{
+                .@"error" = @errorName(err),
+            });
+        };
+    }
+
+    /// Reload config file and update apps
+    pub fn reloadConfig(self: *HttpServer) !void {
+        const path = self.config_path orelse return error.NoConfigPath;
+
+        var logger = log.stdout();
+        logger.info("config_reload_start", .{
+            .path = path,
+        });
+
+        // Load new config
+        var new_cfg = config_mod.loadConfig(self.allocator, path) catch |err| {
+            // Parse error - log but don't crash, keep existing apps running
+            var err_logger = log.stderr();
+            err_logger.err("config_parse_error", .{
+                .path = path,
+                .@"error" = @errorName(err),
+            });
+            return err;
+        };
+        defer new_cfg.deinit();
+
+        // Build set of new hostnames
+        var new_hostnames = std.StringHashMap(config_mod.AppConfig).init(self.allocator);
+        defer new_hostnames.deinit();
+
+        for (new_cfg.apps) |app_cfg| {
+            try new_hostnames.put(app_cfg.hostname, app_cfg);
+        }
+
+        // Find apps to remove (in current but not in new)
+        var to_remove: std.ArrayListUnmanaged([]const u8) = .{};
+        defer to_remove.deinit(self.allocator);
+
+        var current_iter = self.apps.keyIterator();
+        while (current_iter.next()) |key| {
+            if (!new_hostnames.contains(key.*)) {
+                try to_remove.append(self.allocator, key.*);
+            }
+        }
+
+        // Remove old apps
+        var removed_count: usize = 0;
+        for (to_remove.items) |hostname| {
+            self.removeApp(hostname);
+            removed_count += 1;
+        }
+
+        // Find apps to add (in new but not in current)
+        var added_count: usize = 0;
+        var new_iter = new_hostnames.iterator();
+        while (new_iter.next()) |entry| {
+            if (!self.apps.contains(entry.key_ptr.*)) {
+                self.addApp(entry.value_ptr.*) catch |err| {
+                    var err_logger = log.stderr();
+                    err_logger.err("app_add_failed", .{
+                        .hostname = entry.key_ptr.*,
+                        .@"error" = @errorName(err),
+                    });
+                    continue;
+                };
+                added_count += 1;
+            }
+        }
+
+        // TODO: Handle changed apps (same hostname, different path) - for now, just track unchanged
+        const unchanged_count = self.apps.count() - added_count;
+
+        logger.info("config_reload_complete", .{
+            .added = added_count,
+            .removed = removed_count,
+            .unchanged = unchanged_count,
+        });
+    }
+
+    /// Remove an app by hostname
+    fn removeApp(self: *HttpServer, hostname: []const u8) void {
+        var logger = log.stdout();
+
+        // Find and remove from HashMap
+        if (self.apps.fetchRemove(hostname)) |kv| {
+            const app_ptr = kv.value;
+
+            // Free the hostname key (we allocated it)
+            self.allocator.free(kv.key);
+
+            // Find in storage and remove
+            for (self.app_storage.items, 0..) |*stored_app, i| {
+                // Compare by pointer - app_ptr points into app_storage.items
+                const stored_ptr: *app_module.App = stored_app;
+                if (stored_ptr == app_ptr) {
+                    // Cleanup V8 resources (follows correct order)
+                    stored_app.deinit();
+                    _ = self.app_storage.swapRemove(i);
+                    break;
+                }
+            }
+
+            // Update default_app if we removed it
+            if (self.default_app == app_ptr) {
+                self.default_app = if (self.app_storage.items.len > 0)
+                    &self.app_storage.items[0]
+                else
+                    null;
+            }
+
+            logger.info("app_removed", .{
+                .hostname = hostname,
+            });
+        }
+    }
+
+    /// Add a new app from config
+    fn addApp(self: *HttpServer, app_cfg: config_mod.AppConfig) !void {
+        var logger = log.stdout();
+
+        // Load the app
+        var loaded_app = app_module.loadApp(self.allocator, app_cfg.path, self.array_buffer_allocator) catch |err| {
+            logError("Failed to load app", app_cfg.name, err);
+            return err;
+        };
+
+        // Apply config settings
+        loaded_app.timeout_ms = app_cfg.timeout_ms;
+        loaded_app.memory_limit_mb = app_cfg.memory_mb;
+        loaded_app.event_loop = &self.event_loop;
+
+        // Store the app
+        try self.app_storage.append(self.allocator, loaded_app);
+        const app_ptr = &self.app_storage.items[self.app_storage.items.len - 1];
+
+        // Register hostname -> app mapping
+        const hostname_key = try self.allocator.dupe(u8, app_cfg.hostname);
+        try self.apps.put(hostname_key, app_ptr);
+
+        // First app becomes default if none set
+        if (self.default_app == null) {
+            self.default_app = app_ptr;
+        }
+
+        logger.info("app_added", .{
+            .name = app_cfg.name,
+            .hostname = app_cfg.hostname,
+            .path = app_cfg.path,
+        });
+    }
+
     pub fn deinit(self: *HttpServer) void {
+        // Clean up config watcher
+        if (self.config_watcher) |*watcher| {
+            watcher.deinit();
+        }
+        if (self.config_path) |path| {
+            self.allocator.free(path);
+        }
+
         // Clean up single app mode
         if (self.app) |*a| {
             a.deinit();
@@ -515,12 +710,15 @@ pub fn serveWithConfig(port: u16, app_path: ?[]const u8, timeout_ms: ?u64, memor
 }
 
 /// Start HTTP server in multi-app mode with virtual host routing
-pub fn serveMultiApp(cfg: config_mod.Config) !void {
+pub fn serveMultiApp(cfg: config_mod.Config, config_path: []const u8) !void {
     var http_server = try HttpServer.init(cfg.port, std.heap.page_allocator);
     defer http_server.deinit();
 
     // Load all apps from config
     try http_server.loadApps(cfg);
+
+    // Start config file watcher for hot reload
+    try http_server.startConfigWatcher(config_path);
 
     // Install signal handlers for graceful shutdown
     global_server = &http_server;
