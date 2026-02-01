@@ -680,28 +680,119 @@ pub const HttpServer = struct {
         return .{ .status = 200, .body_len = json_body.len };
     }
 
-    /// Stub for handleAddApp - will be implemented in Task 3
+    /// POST /admin/apps - Add a new app dynamically
     fn handleAddApp(self: *HttpServer, conn: std.net.Server.Connection, body: []const u8) AdminResult {
-        _ = self;
-        _ = conn;
-        _ = body;
-        return .{ .status = 501, .body_len = 0 };
+        // Parse JSON body
+        const parsed = std.json.parseFromSlice(std.json.Value, self.allocator, body, .{}) catch {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Invalid JSON\"}");
+        };
+        defer parsed.deinit();
+
+        const root = parsed.value;
+
+        // Ensure root is an object
+        if (root != .object) {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Expected JSON object\"}");
+        }
+
+        // Extract required fields
+        const hostname_val = root.object.get("hostname") orelse {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Missing hostname\"}");
+        };
+        const path_val = root.object.get("path") orelse {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Missing path\"}");
+        };
+
+        if (hostname_val != .string or path_val != .string) {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Invalid field types\"}");
+        }
+
+        // Check if hostname already exists
+        if (self.apps.contains(hostname_val.string)) {
+            return self.sendAdminResponse(conn, 409, "{\"error\":\"Hostname already exists\"}");
+        }
+
+        // Create AppConfig and add
+        const name_val = root.object.get("name");
+        const name = if (name_val) |n| (if (n == .string) n.string else hostname_val.string) else hostname_val.string;
+
+        const timeout: u64 = if (root.object.get("timeout_ms")) |t| (if (t == .integer) @as(u64, @intCast(t.integer)) else 5000) else 5000;
+        const memory: usize = if (root.object.get("memory_mb")) |m| (if (m == .integer) @as(usize, @intCast(m.integer)) else 128) else 128;
+
+        const app_cfg = config_mod.AppConfig{
+            .name = self.allocator.dupe(u8, name) catch return self.sendAdminResponse(conn, 500, "{\"error\":\"Out of memory\"}"),
+            .path = self.allocator.dupe(u8, path_val.string) catch return self.sendAdminResponse(conn, 500, "{\"error\":\"Out of memory\"}"),
+            .hostname = self.allocator.dupe(u8, hostname_val.string) catch return self.sendAdminResponse(conn, 500, "{\"error\":\"Out of memory\"}"),
+            .port = 0,
+            .timeout_ms = timeout,
+            .memory_mb = memory,
+        };
+
+        self.addApp(app_cfg) catch |err| {
+            // Free allocated strings on error
+            self.allocator.free(app_cfg.name);
+            self.allocator.free(app_cfg.path);
+            self.allocator.free(app_cfg.hostname);
+
+            var err_buf: [256]u8 = undefined;
+            const err_msg = std.fmt.bufPrint(&err_buf, "{{\"error\":\"Failed to load app: {s}\"}}", .{@errorName(err)}) catch "{\"error\":\"Failed to load app\"}";
+            return self.sendAdminResponse(conn, 500, err_msg);
+        };
+
+        return self.sendAdminResponse(conn, 201, "{\"success\":true}");
     }
 
-    /// Stub for handleRemoveApp - will be implemented in Task 3
+    /// DELETE /admin/apps?hostname=X - Remove an app by hostname
     fn handleRemoveApp(self: *HttpServer, conn: std.net.Server.Connection, path: []const u8, body: []const u8) AdminResult {
-        _ = self;
-        _ = conn;
-        _ = path;
         _ = body;
-        return .{ .status = 501, .body_len = 0 };
+
+        // Parse hostname from query string
+        const query_start = std.mem.indexOf(u8, path, "?") orelse {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Missing hostname parameter\"}");
+        };
+        const query = path[query_start + 1 ..];
+
+        // Simple query parsing for hostname=X
+        var hostname: ?[]const u8 = null;
+        var params = std.mem.splitSequence(u8, query, "&");
+        while (params.next()) |param| {
+            if (std.mem.startsWith(u8, param, "hostname=")) {
+                hostname = param[9..];
+                break;
+            }
+        }
+
+        const target_hostname = hostname orelse {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Missing hostname parameter\"}");
+        };
+
+        // Check app exists
+        if (!self.apps.contains(target_hostname)) {
+            return self.sendAdminResponse(conn, 404, "{\"error\":\"App not found\"}");
+        }
+
+        // Don't allow removing the last app
+        if (self.apps.count() == 1) {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"Cannot remove last app\"}");
+        }
+
+        self.removeApp(target_hostname);
+        return self.sendAdminResponse(conn, 200, "{\"success\":true}");
     }
 
-    /// Stub for handleReloadConfig - will be implemented in Task 3
+    /// POST /admin/reload - Trigger config file reload
     fn handleReloadConfig(self: *HttpServer, conn: std.net.Server.Connection) AdminResult {
-        _ = self;
-        _ = conn;
-        return .{ .status = 501, .body_len = 0 };
+        if (self.config_path == null) {
+            return self.sendAdminResponse(conn, 400, "{\"error\":\"No config file configured\"}");
+        }
+
+        self.reloadConfig() catch |err| {
+            var err_buf: [256]u8 = undefined;
+            const err_msg = std.fmt.bufPrint(&err_buf, "{{\"error\":\"Reload failed: {s}\"}}", .{@errorName(err)}) catch "{\"error\":\"Reload failed\"}";
+            return self.sendAdminResponse(conn, 500, err_msg);
+        };
+
+        return self.sendAdminResponse(conn, 200, "{\"success\":true}");
     }
 };
 
