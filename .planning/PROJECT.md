@@ -8,6 +8,16 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 **Skip the container fleet entirely.** One NANO process replaces dozens of Node containers, their image builds, fleet management, and routing infrastructure — while maintaining isolation between apps.
 
+## Current Milestone: v1.2 Production Polish
+
+**Goal:** Add WinterCG Streams API, per-app environment variables, graceful shutdown with connection draining, and documentation website.
+
+**Target features:**
+- Streams API (WinterCG-aligned ReadableStream/WritableStream)
+- Per-app environment variables (config JSON, complete isolation)
+- Graceful shutdown (connection draining on app removal AND process shutdown)
+- Documentation website (Astro + Starlight with WinterCG standards reference)
+
 ## Current State (v1.1 Shipped)
 
 **Version:** v1.1 Multi-App Hosting (shipped 2026-02-01)
@@ -55,13 +65,17 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 - Virtual host routing (multiple apps on same port) — v1.1
 - Hot reload apps without restart — v1.1
 
+### Active (v1.2)
+
+- [ ] Streams API (WinterCG-aligned ReadableStream/WritableStream)
+- [ ] Per-app environment variables (config JSON, isolated per app)
+- [ ] Graceful shutdown with connection draining (app removal + process shutdown)
+- [ ] Documentation website (Astro + Starlight)
+
 ### Future (v2 candidates)
 
 - [ ] Sub-5ms cold start for new isolates (via V8 snapshots)
-- [ ] Streams API (ReadableStream, WritableStream)
 - [ ] Isolate pooling (warm isolate reuse)
-- [ ] Graceful shutdown (drain connections, clean app removal)
-- [ ] Per-app environment variables
 
 ### Out of Scope
 
@@ -132,4 +146,4 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 </details>
 
 ---
-*Last updated: 2026-02-01 after v1.1 milestone*
+*Last updated: 2026-02-01 after starting v1.2 milestone*

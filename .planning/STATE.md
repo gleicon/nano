@@ -5,17 +5,18 @@
 See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** Skip the container fleet entirely - one process hosts many isolated JS apps
-**Current focus:** Planning next milestone
+**Current focus:** v1.2 Production Polish
 
 ## Current Position
 
-Phase: No active milestone
-Plan: N/A
-Status: v1.1 shipped, ready for next milestone
-Last activity: 2026-02-01 — v1.1 Multi-App Hosting complete
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-01 — Milestone v1.2 started
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
+Progress: [░░░░░░░░░░] 0% (v1.2)
 
 ## Shipped Milestones
 
@@ -55,17 +56,11 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-01
-Stopped at: v1.1 milestone complete
+Stopped at: Starting v1.2 milestone
 Resume file: None
 
 ## Next Steps
 
-v1.1 shipped. Start next milestone:
+Defining v1.2 requirements. After requirements/roadmap complete:
 
-`/gsd:new-milestone`
-
-This will:
-1. Gather requirements through questioning
-2. Research implementation approaches
-3. Create REQUIREMENTS.md for new milestone
-4. Create ROADMAP.md with phase breakdown
+`/gsd:plan-phase [N]`
