@@ -156,8 +156,8 @@ fn serveMultiApp(config_path: []const u8, stderr: std.fs.File) !void {
         return error.NoApps;
     }
 
-    // Start multi-app server with virtual host routing
-    try server.serveMultiApp(cfg);
+    // Start multi-app server with virtual host routing and config watching
+    try server.serveMultiApp(cfg, config_path);
 }
 
 fn evalCommand(script_source: []const u8, stdout: std.fs.File, stderr: std.fs.File) !void {
