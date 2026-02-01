@@ -12,13 +12,13 @@ pub const ConfigWatcher = struct {
     completion: xev.Completion,
     config_path: []const u8,
     last_mtime: i128,
-    last_change_time: i64, // For debounce (nanoseconds)
+    last_change_time: i128, // For debounce (nanoseconds)
     server_ptr: *anyopaque, // Pointer to HttpServer (opaque to avoid circular dep)
     reload_callback: ReloadCallback,
     active: bool,
 
     const POLL_INTERVAL_MS: u64 = 2000; // Poll every 2 seconds
-    const DEBOUNCE_NS: i64 = 500_000_000; // 500ms debounce
+    const DEBOUNCE_NS: i128 = 500_000_000; // 500ms debounce
 
     /// Initialize config watcher with path and server reference
     pub fn init(config_path: []const u8, server_ptr: *anyopaque, reload_callback: ReloadCallback) !ConfigWatcher {
