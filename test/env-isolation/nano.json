@@ -1,0 +1,23 @@
+{
+  "port": 8080,
+  "apps": [
+    {
+      "name": "app-a",
+      "path": "./test/apps/env-a",
+      "hostname": "a.local",
+      "env": {
+        "API_KEY": "key-a",
+        "APP_NAME": "A"
+      }
+    },
+    {
+      "name": "app-b",
+      "path": "./test/apps/env-b",
+      "hostname": "b.local",
+      "env": {
+        "API_KEY": "key-b",
+        "APP_NAME": "B"
+      }
+    }
+  ]
+}
