@@ -10,13 +10,13 @@ See: .planning/PROJECT.md (updated 2026-02-01)
 ## Current Position
 
 Phase: v1.2-01 of 5 (Per-App Environment Variables)
-Plan: Ready to plan
-Status: Not started
-Last activity: 2026-02-02 — Roadmap created for v1.2 milestone
+Plan: 1 of 1 complete
+Status: Phase complete
+Last activity: 2026-02-03 — Completed v1.2-01-01-PLAN.md
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
-Progress: [░░░░░░░░░░] 0% (v1.2)
+Progress: [##░░░░░░░░] 20% (v1.2)
 
 ## Shipped Milestones
 
@@ -32,8 +32,8 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
-- v1.2: 0 plans (just starting)
-- Total: 17 plans, 8 phases
+- v1.2: 1 plan (in progress)
+- Total: 18 plans, 9 phases
 
 ## Accumulated Context
 
@@ -48,6 +48,11 @@ Key architectural decisions:
 - Function pointer callbacks avoid circular imports
 - Admin /admin/* prefix for clear API separation
 
+**Recent (v1.2-01-01):**
+- Deep copy env HashMap for hot-reload safety (prevents use-after-free)
+- Pass env as second fetch parameter (Cloudflare Workers pattern)
+- Empty env object when no vars defined (consistent API)
+
 ### Pending Todos
 
 None.
@@ -58,15 +63,15 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-02
-Stopped at: Roadmap creation for v1.2 milestone
+Last session: 2026-02-03
+Stopped at: Completed v1.2-01-01-PLAN.md execution
 Resume file: None
 
 ## Next Steps
 
-Roadmap complete. Start planning:
+Phase v1.2-01 complete. Continue to next phase:
 
-`/gsd:plan-phase v1.2-01`
+`/gsd:plan-phase v1.2-02`
 
 ---
-*Last updated: 2026-02-02 after roadmap creation*
+*Last updated: 2026-02-03 after v1.2-01-01 plan completion*
