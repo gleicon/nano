@@ -2,5 +2,14 @@
   "mode": "yolo",
   "depth": "quick",
   "parallelization": true,
-  "created": "2025-01-18"
+  "created": "2025-01-18",
+  "model_profile": "budget",
+  "workflow": {
+    "research": true,
+    "plan_check": true,
+    "verifier": true
+  },
+  "git": {
+    "branching_strategy": "none"
+  }
 }
