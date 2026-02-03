@@ -67,37 +67,37 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| STRM-01 | TBD | Pending |
-| STRM-02 | TBD | Pending |
-| STRM-03 | TBD | Pending |
-| STRM-04 | TBD | Pending |
-| STRM-05 | TBD | Pending |
-| STRM-06 | TBD | Pending |
-| STRM-07 | TBD | Pending |
-| STRM-08 | TBD | Pending |
-| STRM-09 | TBD | Pending |
-| ENVV-01 | TBD | Pending |
-| ENVV-02 | TBD | Pending |
-| ENVV-03 | TBD | Pending |
-| ENVV-04 | TBD | Pending |
-| SHUT-01 | TBD | Pending |
-| SHUT-02 | TBD | Pending |
-| SHUT-03 | TBD | Pending |
-| SHUT-04 | TBD | Pending |
-| SHUT-05 | TBD | Pending |
-| SHUT-06 | TBD | Pending |
-| DOCS-01 | TBD | Pending |
-| DOCS-02 | TBD | Pending |
-| DOCS-03 | TBD | Pending |
-| DOCS-04 | TBD | Pending |
-| DOCS-05 | TBD | Pending |
-| DOCS-06 | TBD | Pending |
+| ENVV-01 | v1.2-01 | Pending |
+| ENVV-02 | v1.2-01 | Pending |
+| ENVV-03 | v1.2-01 | Pending |
+| ENVV-04 | v1.2-01 | Pending |
+| STRM-01 | v1.2-02 | Pending |
+| STRM-02 | v1.2-02 | Pending |
+| STRM-03 | v1.2-02 | Pending |
+| STRM-04 | v1.2-02 | Pending |
+| STRM-05 | v1.2-02 | Pending |
+| STRM-06 | v1.2-02 | Pending |
+| STRM-07 | v1.2-02 | Pending |
+| STRM-08 | v1.2-03 | Pending |
+| STRM-09 | v1.2-03 | Pending |
+| SHUT-01 | v1.2-04 | Pending |
+| SHUT-02 | v1.2-04 | Pending |
+| SHUT-03 | v1.2-04 | Pending |
+| SHUT-04 | v1.2-04 | Pending |
+| SHUT-05 | v1.2-04 | Pending |
+| SHUT-06 | v1.2-04 | Pending |
+| DOCS-01 | v1.2-05 | Pending |
+| DOCS-02 | v1.2-05 | Pending |
+| DOCS-03 | v1.2-05 | Pending |
+| DOCS-04 | v1.2-05 | Pending |
+| DOCS-05 | v1.2-05 | Pending |
+| DOCS-06 | v1.2-05 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 25 total
-- Mapped to phases: 0
-- Unmapped: 25
+- Mapped to phases: 25
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-02*
-*Last updated: 2026-02-02 after initial definition*
+*Last updated: 2026-02-02 after roadmap creation*

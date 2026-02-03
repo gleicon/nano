@@ -4,15 +4,15 @@
 
 See: .planning/PROJECT.md (updated 2026-02-01)
 
-**Core value:** Skip the container fleet entirely - one process hosts many isolated JS apps
-**Current focus:** v1.2 Production Polish
+**Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
+**Current focus:** Phase v1.2-01 Per-App Environment Variables
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-01 — Milestone v1.2 started
+Phase: v1.2-01 of 5 (Per-App Environment Variables)
+Plan: Ready to plan
+Status: Not started
+Last activity: 2026-02-02 — Roadmap created for v1.2 milestone
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
@@ -32,6 +32,7 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
+- v1.2: 0 plans (just starting)
 - Total: 17 plans, 8 phases
 
 ## Accumulated Context
@@ -44,6 +45,8 @@ Key architectural decisions:
 - Workers API over Node API for simpler surface
 - Single-threaded MVP (pooling deferred)
 - Poll-based config watching (libxev lacks filesystem events)
+- Function pointer callbacks avoid circular imports
+- Admin /admin/* prefix for clear API separation
 
 ### Pending Todos
 
@@ -55,12 +58,15 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-01
-Stopped at: Starting v1.2 milestone
+Last session: 2026-02-02
+Stopped at: Roadmap creation for v1.2 milestone
 Resume file: None
 
 ## Next Steps
 
-Defining v1.2 requirements. After requirements/roadmap complete:
+Roadmap complete. Start planning:
 
-`/gsd:plan-phase [N]`
+`/gsd:plan-phase v1.2-01`
+
+---
+*Last updated: 2026-02-02 after roadmap creation*
