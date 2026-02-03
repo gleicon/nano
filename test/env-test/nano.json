@@ -2,7 +2,7 @@
   "port": 8080,
   "apps": [{
     "name": "test-app",
-    "path": "./test/apps/basic",
+    "path": "./test/apps/env-test",
     "hostname": "test.local",
     "env": {
       "API_KEY": "secret123",

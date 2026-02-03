@@ -43,6 +43,8 @@ pub const App = struct {
     timeout_ms: u64 = watchdog.EXTENDED_TIMEOUT_MS,
     // Memory limit in MB (0 = no limit, default 128MB)
     memory_limit_mb: usize = DEFAULT_MEMORY_LIMIT_MB,
+    // Environment variables (App owns this HashMap - deep copy from AppConfig)
+    env: std.StringHashMap([]const u8),
 
     pub fn deinit(self: *App) void {
         // Enter isolate to clean up persistent handles
@@ -62,6 +64,15 @@ pub const App = struct {
         // Exit and destroy isolate
         isolate.exit();
         isolate.deinit();
+
+        // Clean up environment variables HashMap
+        var it = self.env.iterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.env.deinit();
+
         self.allocator.free(self.script_source);
         self.allocator.free(self.app_path);
     }
@@ -165,7 +176,7 @@ fn transformExportDefault(allocator: std.mem.Allocator, source: []const u8) ![]c
 }
 
 /// Load an app from a folder path and compile the script
-pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allocator: ArrayBufferAllocator) !App {
+pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allocator: ArrayBufferAllocator, app_config_env: ?std.StringHashMap([]const u8)) !App {
     // Build path to index.js
     var path_buf: [4096]u8 = undefined;
     const index_path = std.fmt.bufPrint(&path_buf, "{s}/index.js", .{path}) catch {
@@ -334,6 +345,57 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
     handle_scope.deinit();
     isolate.exit();
 
+    // Initialize App-owned environment variables HashMap (deep copy from AppConfig)
+    var env_map = std.StringHashMap([]const u8).init(allocator);
+    if (app_config_env) |config_env| {
+        var it = config_env.iterator();
+        while (it.next()) |entry| {
+            const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                // Cleanup on error
+                var cleanup_it = env_map.iterator();
+                while (cleanup_it.next()) |cleanup_entry| {
+                    allocator.free(cleanup_entry.key_ptr.*);
+                    allocator.free(cleanup_entry.value_ptr.*);
+                }
+                env_map.deinit();
+                allocator.free(source);
+                allocator.free(app_path_copy);
+                return error.OutOfMemory;
+            };
+            errdefer allocator.free(key_copy);
+
+            const val_copy = allocator.dupe(u8, entry.value_ptr.*) catch {
+                allocator.free(key_copy);
+                // Cleanup on error
+                var cleanup_it = env_map.iterator();
+                while (cleanup_it.next()) |cleanup_entry| {
+                    allocator.free(cleanup_entry.key_ptr.*);
+                    allocator.free(cleanup_entry.value_ptr.*);
+                }
+                env_map.deinit();
+                allocator.free(source);
+                allocator.free(app_path_copy);
+                return error.OutOfMemory;
+            };
+            errdefer allocator.free(val_copy);
+
+            env_map.put(key_copy, val_copy) catch {
+                allocator.free(key_copy);
+                allocator.free(val_copy);
+                // Cleanup on error
+                var cleanup_it = env_map.iterator();
+                while (cleanup_it.next()) |cleanup_entry| {
+                    allocator.free(cleanup_entry.key_ptr.*);
+                    allocator.free(cleanup_entry.value_ptr.*);
+                }
+                env_map.deinit();
+                allocator.free(source);
+                allocator.free(app_path_copy);
+                return error.OutOfMemory;
+            };
+        }
+    }
+
     return App{
         .allocator = allocator,
         .script_source = source,
@@ -344,6 +406,7 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
         .persistent_exports = persistent_exports,
         .persistent_fetch = persistent_fetch,
         .initialized = true,
+        .env = env_map,
     };
 }
 
@@ -357,6 +420,24 @@ pub const HandleResult = struct {
         allocator.free(self.body);
     }
 };
+
+/// Build V8 object from app environment variables
+fn buildEnvObject(
+    isolate: v8.Isolate,
+    context: v8.Context,
+    app_env: *const std.StringHashMap([]const u8),
+) v8.Object {
+    const env_obj = v8.Object.init(isolate);
+
+    var it = app_env.iterator();
+    while (it.next()) |entry| {
+        const key_str = v8.String.initUtf8(isolate, entry.key_ptr.*);
+        const val_str = v8.String.initUtf8(isolate, entry.value_ptr.*);
+        _ = env_obj.setValue(context, key_str, val_str.toValue());
+    }
+
+    return env_obj;
+}
 
 /// Handle an HTTP request using the cached fetch handler
 pub fn handleRequest(
@@ -417,9 +498,15 @@ pub fn handleRequest(
     // Create Request object
     const request_obj = request_api.createRequest(isolate, context, full_url, method, body);
 
-    // Call the cached fetch handler
+    // Build environment object
+    const env_obj = buildEnvObject(isolate, context, &app.env);
+
+    // Call the cached fetch handler with request and env
     const fetch_fn = v8.Function{ .handle = @ptrCast(fetch_val.handle) };
-    var fetch_args: [1]v8.Value = .{v8.Value{ .handle = @ptrCast(request_obj.handle) }};
+    var fetch_args: [2]v8.Value = .{
+        v8.Value{ .handle = @ptrCast(request_obj.handle) },
+        v8.Value{ .handle = @ptrCast(env_obj.handle) },
+    };
     const handler_result = fetch_fn.call(context, exports, &fetch_args) orelse {
         // Check if terminated by watchdog
         if (wd.wasTerminated()) {
