@@ -8,6 +8,7 @@ pub const AppConfig = struct {
     port: u16, // Kept for backwards compatibility, ignored in multi-app mode
     timeout_ms: u64,
     memory_mb: usize,
+    env: ?std.StringHashMap([]const u8),
 };
 
 /// Default configuration values
@@ -28,6 +29,17 @@ pub const Config = struct {
             self.allocator.free(app.name);
             self.allocator.free(app.path);
             self.allocator.free(app.hostname);
+
+            // Clean up environment variables HashMap
+            if (app.env) |env_map| {
+                var mut_map = env_map;
+                var it = mut_map.iterator();
+                while (it.next()) |entry| {
+                    self.allocator.free(entry.key_ptr.*);
+                    self.allocator.free(entry.value_ptr.*);
+                }
+                mut_map.deinit();
+            }
         }
         self.allocator.free(self.apps);
     }
@@ -167,6 +179,42 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
             }
         }
 
+        // Parse optional environment variables
+        var env_map: ?std.StringHashMap([]const u8) = null;
+        if (app_obj.get("env")) |env_val| {
+            if (env_val == .object) {
+                var map = std.StringHashMap([]const u8).init(allocator);
+                errdefer {
+                    var it = map.iterator();
+                    while (it.next()) |entry| {
+                        allocator.free(entry.key_ptr.*);
+                        allocator.free(entry.value_ptr.*);
+                    }
+                    map.deinit();
+                }
+
+                var env_it = env_val.object.iterator();
+                while (env_it.next()) |entry| {
+                    if (entry.value_ptr.* == .string) {
+                        const key_copy = allocator.dupe(u8, entry.key_ptr.*) catch {
+                            return ParseError.OutOfMemory;
+                        };
+                        errdefer allocator.free(key_copy);
+
+                        const val_copy = allocator.dupe(u8, entry.value_ptr.*.string) catch {
+                            return ParseError.OutOfMemory;
+                        };
+                        errdefer allocator.free(val_copy);
+
+                        map.put(key_copy, val_copy) catch {
+                            return ParseError.OutOfMemory;
+                        };
+                    }
+                }
+                env_map = map;
+            }
+        }
+
         apps[i] = AppConfig{
             .name = name,
             .path = path,
@@ -174,6 +222,7 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
             .port = app_port,
             .timeout_ms = timeout_ms,
             .memory_mb = memory_mb,
+            .env = env_map,
         };
         i += 1;
     }

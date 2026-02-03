@@ -726,6 +726,7 @@ pub const HttpServer = struct {
             .port = 0,
             .timeout_ms = timeout,
             .memory_mb = memory,
+            .env = null,
         };
 
         self.addApp(app_cfg) catch |err| {
