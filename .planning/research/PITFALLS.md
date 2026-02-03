@@ -354,6 +354,83 @@ const zig_string: []const u8 = "hello";  // UTF-8
 - Write conversion helpers once, test thoroughly
 - Consider ExternalOneByteString for ASCII content
 
+---
+
+## v1.2 Production Polish: Key Pitfalls
+
+### Streams Pitfalls
+
+**S1: Unbounded Queue Growth**
+- Arena allocator exhausted by streaming responses where producer > consumer
+- Check `controller.desiredSize` before enqueue; implement pull-based streaming
+- Phase: 01-streams
+
+**S2: TransformStream Backpressure Bypass**
+- `controller.enqueue()` ignores backpressure, violates WHATWG spec
+- Check `desiredSize <= 0`, return Promise if queue full
+- Phase: 01-streams
+
+**S3: Chunk Lifetime Across V8/Zig Boundary**
+- Zig arena memory freed while V8 holds stream chunk reference → use-after-free
+- Clear ownership: V8 owns ArrayBuffer OR Zig copies on boundary; use `ArrayBuffer::Externalize()`
+- Phase: 01-streams
+
+**Integration - Arena + Streams**
+- Streams outlive request; arena freed mid-streaming
+- Separate allocator for stream buffers OR reference counting OR copy to V8 heap
+- Phase: 01-streams CRITICAL
+
+**Integration - Watchdog + Streams**
+- CPU watchdog (5s) terminates long-running streams → corrupted response
+- Track CPU time not wall clock; I/O wait doesn't count; extend timeout for streams
+- Phase: 01-streams
+
+### Graceful Shutdown Pitfalls
+
+**G1: Signal Handler Race**
+- Signal handler modifies state while V8 executing → inconsistent state (CWE-364)
+- Handler ONLY sets atomic flag; use `signalfd()` or self-pipe for integration
+- Phase: 02-shutdown
+
+**G2: No In-Flight Request Tracking**
+- Server closes socket while processing request → partial response, connection reset
+- Add atomic counter for in-flight; shutdown waits counter==0 or 30s timeout
+- Phase: 02-shutdown
+
+**G3: App Removal Without Drain**
+- `DELETE /admin/apps` removes immediately; in-flight requests lose isolate → crash
+- Mark app "draining" first (stop routing); wait for in-flight; return 503 for new
+- Phase: 02-shutdown
+
+**Integration - Hot Reload + Shutdown**
+- Config reload and full shutdown use different paths → bugs in one but not other
+- Extract common "app drain + dispose" logic; use same path for all removal scenarios
+- Phase: 02-shutdown
+
+### Environment Variable Pitfalls
+
+**E1: Process.env Contamination**
+- Modifying global `process.env` leaks one app's secrets to other apps (critical multi-tenant)
+- Per-isolate env on context global; freeze after creation; each isolate gets copy
+- Phase: 03-env-vars
+
+**E2: Prototype Pollution**
+- Plain JS env object allows `env.__proto__.SECRET = "hack"` → prototype chain pollution
+- Create with `Object.create(null)`, freeze, use V8 template with null prototype
+- Phase: 03-env-vars
+
+**E3: Leakage via Side Channels**
+- Secrets leak through error messages, logs, stack traces even with isolation
+- Sanitize errors; never log env values; separate "secrets" from "config"; redact traces
+- Phase: 03-env-vars
+
+**Integration - Multi-App Env Isolation**
+- Env vars stored on shared structures → isolation fails
+- Env vars per-isolate, not per-platform; test with multiple apps same key, different values
+- Phase: 03-env-vars
+
+---
+
 ## Prevention Checklist by Phase
 
 ### Phase 1: V8 Foundation
@@ -385,35 +462,63 @@ const zig_string: []const u8 = "hello";  // UTF-8
 - [ ] Heap statistics monitoring
 - [ ] Structured error responses (no stack traces to clients)
 
-## Testing Strategies for Pitfalls
+### v1.2: Streams API
+- [ ] Pull-based streaming (not pump/start)
+- [ ] Backpressure check before enqueue
+- [ ] Chunk ownership model clear (V8 or Zig)
+- [ ] Memory bounded (highWaterMark enforced)
+- [ ] Arena vs stream allocator separation
+
+### v1.2: Graceful Shutdown
+- [ ] Signal handler only sets atomic flag
+- [ ] In-flight request counter
+- [ ] Drain timeout separate from request timeout
+- [ ] App removal drains requests first
+- [ ] Config watcher stops first in shutdown
+
+### v1.2: Environment Variables
+- [ ] Per-isolate env storage (not global)
+- [ ] Object.create(null), then freeze
+- [ ] No `process.env` modification
+- [ ] Error sanitization (no env leaks)
+- [ ] Env var size limits (64 vars, 5KB each)
+
+## Testing Strategies
 
 ### Memory Leak Detection
 ```bash
-# Run with V8 heap tracking
---expose-gc --trace-gc
-
-# Zig with AddressSanitizer
 zig build -Drelease-safe -fsanitize=address
 ```
 
 ### Isolation Verification
 ```javascript
-// Test: App A cannot see App B
-// In App A:
+// App A
 globalThis.secret = "A's secret";
-
-// In App B:
-console.assert(globalThis.secret === undefined, "Isolation breach!");
+// App B
+console.assert(globalThis.secret === undefined);
 ```
 
-### CPU Limit Testing
-```javascript
-// Test: Infinite loop gets terminated
-while(true) {}  // Should be killed after timeout
-```
-
-### Cold Start Measurement
+### Shutdown Testing
 ```bash
-# Measure time from isolate creation to first byte
-perf stat -e cycles,instructions ./nano eval "console.log('hello')"
+for i in {1..100}; do curl "http://localhost:8080/slow" & done
+kill -TERM $NANO_PID
+# Verify: no crashes, graceful completion or errors
+```
+
+### Streams Memory Test
+```javascript
+const rs = new ReadableStream({
+  pull(c) { c.enqueue(new Uint8Array(1024)); }
+});
+const ws = new WritableStream({
+  write(chunk) { return new Promise(r => setTimeout(r, 100)); }
+});
+rs.pipeTo(ws);
+// Memory should stay bounded
+```
+
+### Env Isolation Test
+```javascript
+// App A: env.SECRET = "A"
+// App B: console.assert(env.SECRET === "B")
 ```

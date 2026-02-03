@@ -1,264 +1,516 @@
-# Architecture Research: JavaScript Isolate Runtime
+# Architecture Research: v1.2 Production Polish
 
-## Core Components
+**Project:** NANO v1.2
+**Researched:** 2026-02-02
+**Focus:** Integration of Streams API, Per-app Environment Variables, Graceful Shutdown
 
-| Component | Responsibility | Isolation Level |
-|-----------|---------------|-----------------|
-| **Isolate Manager** | V8 isolate lifecycle (create, enter, exit, dispose) | Per-process |
-| **Context Factory** | Creates execution contexts within isolates | Per-app |
-| **Snapshot Cache** | Precompiled V8 snapshots for fast cold starts | Shared |
-| **I/O Bridge** | Maps JS APIs (fetch, timers) to native calls | Per-isolate |
-| **Request Router** | Routes HTTP requests to correct app/isolate | Per-process |
-| **Resource Limiter** | Enforces CPU time, memory, I/O quotas | Per-isolate |
-| **Event Loop** | Polls async operations, drives execution | Per-isolate |
+---
 
-### Component Diagram
+## Current Architecture Summary
+
+NANO v1.1 has a well-structured architecture with clear module boundaries:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      NANO Process                           │
-├─────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │
-│  │   App A     │    │   App B     │    │   App C     │     │
-│  │  (Isolate)  │    │  (Isolate)  │    │  (Isolate)  │     │
-│  │  ┌───────┐  │    │  ┌───────┐  │    │  ┌───────┐  │     │
-│  │  │Context│  │    │  │Context│  │    │  │Context│  │     │
-│  │  └───────┘  │    │  └───────┘  │    │  └───────┘  │     │
-│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘     │
-│         │                  │                  │             │
-│  ┌──────┴──────────────────┴──────────────────┴──────┐     │
-│  │                    I/O Bridge                      │     │
-│  │         (fetch, timers, console, crypto)           │     │
-│  └──────────────────────┬────────────────────────────┘     │
-│                         │                                   │
-│  ┌──────────────────────┴────────────────────────────┐     │
-│  │              Native Event Loop (Zig)               │     │
-│  │         (epoll/kqueue/io_uring)                    │     │
-│  └────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────┘
+src/
+  main.zig           - CLI entry point, command parsing
+  config.zig         - JSON config parsing (AppConfig, Config structs)
+  js.zig             - V8 helper utilities (CallbackContext, value creation)
+  log.zig            - Structured JSON logging
+
+  server/
+    http.zig         - HttpServer struct, connection handling, admin API
+    app.zig          - App struct (V8 isolate + persistent handles), request handling
+    metrics.zig      - Prometheus metrics
+
+  runtime/
+    event_loop.zig   - EventLoop (xev wrapper), ConfigWatcher, TimerCallback
+    timers.zig       - setTimeout/setInterval implementation
+    watchdog.zig     - CPU timeout enforcement
+
+  api/
+    fetch.zig        - fetch(), Response class
+    request.zig      - Request class
+    headers.zig      - Headers class
+    blob.zig         - Blob, File classes
+    formdata.zig     - FormData class
+    url.zig          - URL, URLSearchParams
+    encoding.zig     - TextEncoder, TextDecoder
+    crypto.zig       - crypto.subtle, randomUUID
+    console.zig      - console.log/warn/error
+    abort.zig        - AbortController, AbortSignal
 ```
 
-## Request Lifecycle
+### Key Architectural Patterns
 
-**1. HTTP Request Arrives**
-```
-Client → TCP Accept → Parse Headers → Extract Host/Path
-```
+1. **V8 Isolate Per App** - Each app has its own V8 isolate with persistent handles for context, exports, and fetch handler
+2. **Arena Allocator Per Request** - Memory isolation, instant cleanup after request
+3. **Function Pointer Callbacks** - Avoids circular imports between modules (e.g., ConfigWatcher -> HttpServer reload)
+4. **libxev Event Loop** - Single-threaded async I/O via xev.Loop wrapper
+5. **Poll-based Config Watching** - 2s poll interval, 500ms debounce for hot reload
 
-**2. Route to App**
-```
-Host header → App Registry lookup → Get/Create Isolate
-```
+---
 
-**3. Isolate Acquisition**
-```
-IF warm isolate available:
-  → Enter existing isolate (< 0.1ms)
-ELSE IF snapshot exists:
-  → Create from snapshot (< 2ms)
-ELSE:
-  → Cold create isolate (40-100ms) ← avoid this path
-```
+## Streams Integration
 
-**4. Execute JavaScript**
-```
-Create HandleScope → Get Context → Create Request object →
-Call fetch handler → Await Response → Extract body
-```
-
-**5. Return Response**
-```
-Response object → Extract status/headers/body →
-Write HTTP response → Release isolate back to pool
-```
-
-**6. Cleanup**
-```
-Arena allocator reset (instant) → Isolate returned to pool
-```
-
-## Isolation Model
-
-### What's SHARED (across all isolates)
-
-| Resource | Rationale |
-|----------|-----------|
-| V8 platform instance | One per process, thread-safe |
-| Snapshot blob | Read-only, same for all apps |
-| Native event loop | Single-threaded, multiplexed |
-| HTTP server socket | Routes to correct isolate |
-
-### What's ISOLATED (per app)
-
-| Resource | Mechanism |
-|----------|-----------|
-| V8 Isolate | Complete JS heap isolation |
-| Global object | Fresh globalThis per context |
-| Memory limits | `SetMaxOldGenerationSize()` |
-| CPU time | Watchdog timer, `TerminateExecution()` |
-| File handles | None exposed (fetch-only I/O) |
-| Environment vars | Not exposed by default |
-
-### Security Boundaries
+### Current Response/fetch Flow
 
 ```
-┌─────────────────────────────────────────┐
-│           Process Boundary              │
-│  ┌───────────────────────────────────┐  │
-│  │        V8 Isolate Boundary        │  │
-│  │  ┌─────────────────────────────┐  │  │
-│  │  │    Context Boundary         │  │  │
-│  │  │    (globalThis, builtins)   │  │  │
-│  │  └─────────────────────────────┘  │  │
-│  │  - Heap is isolated               │  │
-│  │  - No cross-isolate references    │  │
-│  │  - No shared ArrayBuffers         │  │
-│  └───────────────────────────────────┘  │
-│                                         │
-│  Native code has full process access    │
-│  → Must validate all JS ↔ native calls  │
-└─────────────────────────────────────────┘
+Current flow (v1.1):
+1. fetch() in JS calls doFetch() in Zig
+2. doFetch() uses std.http.Client to make request
+3. Full response body read into []u8 buffer
+4. FetchResult{status, body, headers} returned
+5. createFetchResponse() builds V8 Response object with _body string
+
+Current Response construction:
+- new Response(body, options) stores body as _body string
+- response.text() returns _body directly
+- response.json() parses _body as JSON
+- No streaming - entire body buffered in memory
 ```
 
-## V8 Snapshot System
+### Streams API Integration Points
 
-### How Snapshots Enable Fast Cold Starts
+**ReadableStream integration with Response:**
 
-**Without snapshots:**
 ```
-Create Isolate → Initialize builtins → Parse globals →
-Compile standard library → Ready
-Total: 40-100ms
+Integration points:
+1. Response._body can be either:
+   - string (current, for backwards compatibility)
+   - ReadableStream (new, for streaming)
+
+2. Response.body getter:
+   - Returns ReadableStream if body is streamable
+   - Returns null if body was consumed
+
+3. Response.text() / Response.json() / Response.arrayBuffer():
+   - If _body is string: return directly (current behavior)
+   - If _body is ReadableStream: collect chunks, return when done
 ```
 
-**With snapshots:**
+**Streaming fetch response:**
+
 ```
-Create Isolate from blob → Ready
-Total: 1-2ms
+New flow for streaming:
+1. fetch() creates Response immediately after headers received
+2. Response.body = ReadableStream wrapping the HTTP connection
+3. User code can:
+   - await response.text() - buffers entire body (current behavior)
+   - Use response.body.getReader() - read chunks incrementally
+   - Pipe to WritableStream - zero-copy forwarding
 ```
 
-### Snapshot Creation (build time)
+**Implementation approach:**
 
-```cpp
-// Simplified snapshot creation
-v8::SnapshotCreator creator;
-v8::Isolate* isolate = creator.GetIsolate();
+```zig
+// In api/streams.zig (NEW FILE)
+pub const StreamState = struct {
+    reader_ptr: usize,       // Pointer to HTTP reader
+    done: bool,
+    cancelled: bool,
+};
+
+// ReadableStream stores StreamState in V8 internal field
+// ReadableStreamDefaultReader provides read() method
+// Each read() returns Promise that resolves with {value, done}
+```
+
+**V8 integration pattern:**
+
+```
+ReadableStream needs:
+1. FunctionTemplate for constructor
+2. ObjectTemplate with internal field for StreamState
+3. Prototype methods: getReader(), cancel(), pipeTo(), pipeThrough()
+
+ReadableStreamDefaultReader needs:
+1. FunctionTemplate for construction via getReader()
+2. Prototype methods: read(), cancel(), releaseLock()
+3. read() returns Promise - uses existing Promise resolution pattern from fetch.zig
+```
+
+### Build Order Implication
+
+Streams must be built BEFORE Response refactoring because:
+- Response.body getter returns ReadableStream
+- Response.text()/json() must handle ReadableStream input
+- fetch() must create streaming Response
+
+---
+
+## Graceful Shutdown Integration
+
+### Current Shutdown Flow
+
+```
+Current flow (v1.1):
+1. SIGTERM/SIGINT caught by handleSignal()
+2. handleSignal() calls server.stop()
+3. stop() sets running=false, makes dummy connection to unblock accept()
+4. run() loop exits, deferred deinit() cleans up
+
+For app removal via config reload:
+1. ConfigWatcher detects mtime change
+2. reloadConfigCallback() called
+3. reloadConfig() compares old vs new hostnames
+4. removeApp() calls app.deinit() immediately
+5. No connection draining - in-flight requests may fail
+```
+
+### Connection Draining Requirements
+
+**Two shutdown scenarios:**
+
+1. **Process shutdown (SIGTERM):**
+   - Stop accepting new connections
+   - Wait for in-flight requests to complete (with timeout)
+   - Clean up all resources
+
+2. **App removal (config change):**
+   - Stop routing new requests to removed app
+   - Wait for in-flight requests to that app to complete
+   - Clean up only that app's resources
+
+### Integration Points
+
+**HttpServer changes:**
+
+```zig
+pub const HttpServer = struct {
+    // Existing fields...
+
+    // NEW: Connection tracking
+    active_connections: std.AutoHashMap(u64, ConnectionState),
+    connection_counter: u64,
+
+    // NEW: Shutdown state
+    shutdown_requested: bool,
+    shutdown_timeout_ms: u64,  // Default 30s like Cloudflare
+
+    // NEW: Per-app pending request count
+    // (or track in App struct itself)
+};
+
+const ConnectionState = struct {
+    conn_id: u64,
+    app_hostname: ?[]const u8,  // Which app is handling this
+    start_time: i64,
+};
+```
+
+**App struct changes:**
+
+```zig
+pub const App = struct {
+    // Existing fields...
+
+    // NEW: Lifecycle state
+    state: enum { active, draining, stopped },
+    pending_requests: std.atomic.Value(u32),
+};
+```
+
+**Shutdown sequence:**
+
+```
+Process shutdown:
+1. Set shutdown_requested = true
+2. Stop ConfigWatcher
+3. Stop accepting new connections (close listening socket)
+4. Wait for active_connections to drain (with timeout)
+5. For each remaining connection after timeout: close forcibly
+6. Cleanup apps in parallel (they have no pending requests)
+
+App removal:
+1. Set app.state = .draining
+2. Remove from hostname routing (new requests get 404)
+3. Check app.pending_requests periodically
+4. When pending_requests == 0: call app.deinit()
+5. If timeout exceeded: force deinit anyway
+```
+
+### Integration with ConfigWatcher
+
+```
+ConfigWatcher currently calls reloadConfigCallback immediately.
+For graceful shutdown:
+
+1. reloadConfig() identifies apps to remove
+2. Instead of calling removeApp() immediately:
+   - Mark app as draining
+   - Start drain timer
+   - removeApp() called when drain completes or times out
+
+Need: DrainWatcher or extend ConfigWatcher to track draining apps
+```
+
+### Build Order Implication
+
+Graceful shutdown has TWO levels:
+1. **Basic** (app removal draining) - depends on connection tracking
+2. **Full** (process shutdown draining) - depends on basic + signal handling changes
+
+Suggest building in order:
+1. Connection tracking infrastructure
+2. App removal draining
+3. Process shutdown draining
+
+---
+
+## Environment Variables Integration
+
+### Current Isolate Setup Flow
+
+```
+Current flow in app.zig:
+1. loadApp() creates isolate with v8.Isolate.init(&params)
+2. isolate.enter()
+3. Create HandleScope, Context
+4. Register APIs on global object:
+   - console.registerConsole()
+   - encoding.registerEncodingAPIs()
+   - url.registerURLAPIs()
+   - crypto.registerCryptoAPIs()
+   - fetch_api.registerFetchAPI()
+   - headers.registerHeadersAPI()
+   - request_api.registerRequestAPI()
+   - timers.registerTimerAPIs()
+   - abort.registerAbortAPI()
+   - blob.registerBlobAPI()
+   - formdata.registerFormDataAPI()
+5. Compile and run user script
+6. Store persistent handles
+```
+
+### Environment Variables Injection Point
+
+**Config format extension:**
+
+```json
 {
-  v8::HandleScope scope(isolate);
-  v8::Local<v8::Context> context = v8::Context::New(isolate);
-
-  // Add all globals: fetch, Request, Response, console, etc.
-  InstallWorkerAPIs(context);
-
-  creator.SetDefaultContext(context);
+  "apps": [
+    {
+      "name": "my-app",
+      "path": "./apps/my-app",
+      "hostname": "my-app.local",
+      "env": {
+        "API_KEY": "secret123",
+        "DEBUG": "true",
+        "DATABASE_URL": "postgres://..."
+      }
+    }
+  ]
 }
-v8::StartupData blob = creator.CreateBlob(
-  v8::SnapshotCreator::FunctionCodeHandling::kClear
-);
-// Write blob to disk
 ```
 
-### Snapshot Usage (runtime)
+**Integration in AppConfig:**
 
-```cpp
-// Load from snapshot
-v8::StartupData blob = LoadFromDisk("nano.snapshot");
-v8::Isolate::CreateParams params;
-params.snapshot_blob = &blob;
-v8::Isolate* isolate = v8::Isolate::New(params);
-// Isolate ready with all APIs pre-installed
+```zig
+// In config.zig
+pub const AppConfig = struct {
+    name: []const u8,
+    path: []const u8,
+    hostname: []const u8,
+    port: u16,
+    timeout_ms: u64,
+    memory_mb: usize,
+    // NEW
+    env: ?std.StringHashMap([]const u8),
+};
 ```
 
-### What Goes in the Snapshot
+**Injection point in loadApp:**
 
-| Include | Exclude |
-|---------|---------|
-| Global object template | User code |
-| Built-in APIs (fetch, crypto) | Request-specific data |
-| Compiled helper functions | Mutable state |
-| Standard library polyfills | External bindings |
+```zig
+// After registering all APIs, before compiling user script:
+
+// Register process.env or Deno.env-style env object
+if (app_config.env) |env_vars| {
+    registerEnvVars(isolate, context, env_vars);
+}
+```
+
+**API style options:**
+
+1. **Cloudflare Workers style** - `env` parameter to fetch handler:
+   ```javascript
+   export default {
+     async fetch(request, env) {
+       const key = env.API_KEY;
+     }
+   }
+   ```
+
+2. **Deno style** - `Deno.env.get()`:
+   ```javascript
+   const key = Deno.env.get("API_KEY");
+   ```
+
+3. **Node.js style** - `process.env`:
+   ```javascript
+   const key = process.env.API_KEY;
+   ```
+
+**Recommendation: Cloudflare Workers style**
+
+Rationale:
+- Already passing Request to fetch handler
+- Adding `env` as second parameter is minimal change
+- Explicit about which vars are available (no global state)
+- Aligns with WinterCG patterns
+
+### Implementation Approach
+
+```zig
+// In app.zig, modify handleRequest:
+
+// Build env object from app config
+const env_obj = buildEnvObject(isolate, context, app.env_vars);
+
+// Call fetch with two arguments: (request, env)
+var fetch_args: [2]v8.Value = .{
+    v8.Value{ .handle = @ptrCast(request_obj.handle) },
+    v8.Value{ .handle = @ptrCast(env_obj.handle) },
+};
+const handler_result = fetch_fn.call(context, exports, &fetch_args);
+```
+
+### Build Order Implication
+
+Environment variables are self-contained:
+- Config parsing extension
+- V8 object creation at request time
+- Pass to fetch handler
+
+No dependencies on Streams or Graceful Shutdown. Can be built in any order relative to other features.
+
+---
+
+## New Components Needed
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| ReadableStream | `src/api/streams.zig` | WinterCG ReadableStream implementation |
+| WritableStream | `src/api/streams.zig` | WinterCG WritableStream implementation |
+| TransformStream | `src/api/streams.zig` | Optional, for piping transforms |
+| StreamState | `src/api/streams.zig` | Internal state for stream lifecycle |
+| ConnectionTracker | `src/server/connections.zig` | Track active connections for draining |
+| DrainManager | `src/server/drain.zig` | Coordinate graceful shutdown |
+
+## Modified Components
+
+| Component | File | Changes |
+|-----------|------|---------|
+| AppConfig | `src/config.zig` | Add `env` field for environment variables |
+| Config parsing | `src/config.zig` | Parse `env` object from JSON |
+| App struct | `src/server/app.zig` | Add state enum, pending_requests counter, env_vars |
+| loadApp | `src/server/app.zig` | Accept env vars, store in App |
+| handleRequest | `src/server/app.zig` | Build env object, pass to fetch handler |
+| Response | `src/api/fetch.zig` | Add body getter returning ReadableStream |
+| fetch() | `src/api/fetch.zig` | Option for streaming response |
+| HttpServer | `src/server/http.zig` | Add connection tracking, shutdown state |
+| removeApp | `src/server/http.zig` | Use draining instead of immediate deinit |
+| stop | `src/server/http.zig` | Implement connection draining |
+
+---
 
 ## Suggested Build Order
 
-### Phase 1: V8 Integration Foundation
-**Goal:** Hello World from V8 in Zig
+Based on dependencies analysis:
 
-1. Build V8 with embedding flags
-2. Create C shim for V8 C++ → Zig
-3. Basic isolate lifecycle (new, enter, exit, dispose)
-4. Execute simple JavaScript, get result
-5. Arena allocator integration
+### Phase 1: Environment Variables (Lowest Risk, No Dependencies)
 
-**Milestone:** `nano eval "1 + 1"` returns `2`
+**Why first:**
+- Self-contained feature
+- Config parsing is well-understood pattern
+- No changes to request/response flow
+- Quick win, immediately useful
 
-### Phase 2: API Surface
-**Goal:** Workers-compatible globals
+**Components:**
+1. Extend AppConfig with `env` field
+2. Parse env from config JSON
+3. Store env in App struct
+4. Build V8 object in handleRequest
+5. Pass to fetch handler as second arg
 
-1. Implement `console.log()` (validate binding pattern)
-2. Implement `Request` and `Response` classes
-3. Implement `Headers` class
-4. Implement `fetch()` with native HTTP client
-5. Implement timers (`setTimeout`, `setInterval`)
+### Phase 2: Streams API Foundation
 
-**Milestone:** Run simple Workers script that fetches URL
+**Why second:**
+- Required before Response refactoring
+- No dependencies on other v1.2 features
+- Enables streaming patterns for future features
 
-### Phase 3: HTTP Server + Routing
-**Goal:** Accept HTTP requests, route to apps
+**Components:**
+1. Create `src/api/streams.zig`
+2. Implement ReadableStream class
+3. Implement ReadableStreamDefaultReader
+4. Add read() returning Promise
 
-1. Zig HTTP server (std.http or custom)
-2. App registry (folder path → app config)
-3. Request routing by host/path
-4. Response writing back to client
+### Phase 3: Response/fetch Integration
 
-**Milestone:** Multiple apps on different ports
+**Why third:**
+- Depends on Streams from Phase 2
+- Changes existing API (Response.body)
+- Requires careful backwards compatibility
 
-### Phase 4: Snapshots + Cold Start
-**Goal:** Sub-5ms cold starts
+**Components:**
+1. Modify Response to support ReadableStream body
+2. Add Response.body getter
+3. Modify fetch() for streaming option
+4. Update text()/json() to handle streams
 
-1. Snapshot creation tooling
-2. Load isolates from snapshot
-3. Measure and optimize cold start
-4. Isolate pool (warm isolates)
+### Phase 4: Connection Tracking
 
-**Milestone:** p99 cold start < 5ms
+**Why fourth:**
+- Foundation for graceful shutdown
+- Low risk, additive change
+- Useful for debugging/metrics even without draining
 
-### Phase 5: Resource Limits + Observability
-**Goal:** Production-ready isolation
+**Components:**
+1. Create ConnectionState struct
+2. Add tracking HashMap to HttpServer
+3. Instrument handleConnection for tracking
+4. Add connection count to metrics
 
-1. CPU time limits (watchdog)
-2. Memory limits per isolate
-3. Structured logging per app
-4. Prometheus metrics endpoint
+### Phase 5: Graceful Shutdown
 
-**Milestone:** Can't crash host with runaway script
+**Why last:**
+- Depends on connection tracking
+- Most complex orchestration
+- Two sub-features: app removal + process shutdown
 
-## Reference Implementation Notes
+**Components:**
+1. Add lifecycle state to App
+2. Implement app removal draining
+3. Implement process shutdown draining
+4. Add shutdown timeout configuration
 
-### From Cloudflare workerd
+---
 
-- **Isolate reuse:** Keep isolates warm between requests to same app
-- **Startup snapshots:** Include all APIs in snapshot, not just V8 builtins
-- **Memory limits:** 128MB default, configurable per worker
-- **CPU limits:** 50ms default for free tier, configurable
-- **Eviction:** LRU eviction when memory pressure detected
+## Risk Assessment
 
-### From Deno
-
-- **Ops system:** Clean pattern for JS → native calls (sync and async)
-- **Resource table:** Integer handles for external resources (like file descriptors)
-- **Module loading:** Import maps and URL-based module resolution
-- **Event loop:** Poll-based, integrates with tokio (Rust) / could use io_uring
-
-### From Bun (JSC, but patterns apply)
-
-- **Zig integration:** Proves Zig can embed a JS engine effectively
-- **Arena allocators:** Per-request arenas for zero-overhead cleanup
-- **Native HTTP:** Direct integration beats libuv/libevent
+| Feature | Risk | Mitigation |
+|---------|------|------------|
+| Streams API | Medium - New V8 class pattern | Follow existing fetch.zig patterns for Response class |
+| Env vars | Low - Config extension | Additive, no breaking changes |
+| Connection tracking | Low - Additive instrumentation | Can be added without changing request flow |
+| App removal draining | Medium - Async coordination | Test with slow requests, verify no race conditions |
+| Process shutdown | Medium - Signal handling timing | Test SIGTERM during active requests |
 
 ## Open Questions for Implementation
 
-1. **Isolate pooling strategy:** How many warm isolates per app? LRU vs FIFO?
-2. **Snapshot per-app or global?** Single snapshot with all APIs vs per-app customization?
-3. **Module resolution:** URL-based (Deno-style) or package.json (Node-style)?
-4. **io_uring integration:** Worth the complexity for Linux-only optimization?
-5. **Hot reload:** How to update app code without full process restart?
+1. **Streams memory management:** How to handle backpressure? If JS reads slowly, HTTP buffer grows.
+2. **Drain timeout:** What's the right default? Cloudflare uses 30s. Should it be configurable per-app?
+3. **Env var inheritance:** Should apps inherit process env vars, or only explicit config vars?
+4. **TransformStream:** Required for WinterCG compliance, or defer to v1.3?
+
+---
+
+## Sources
+
+- [WHATWG Streams Standard](https://streams.spec.whatwg.org/)
+- [Cloudflare Workers ReadableStream](https://developers.cloudflare.com/workers/runtime-apis/streams/readablestream/)
+- [Cloudflare Workers WritableStream](https://developers.cloudflare.com/workers/runtime-apis/streams/writablestream/)
+- [workerd Graceful Shutdown Issue #101](https://github.com/cloudflare/workerd/issues/101)
+- [Cloudflare Workers Limits - Memory and Isolation](https://developers.cloudflare.com/workers/platform/limits/)
+- NANO v1.1 source code analysis
