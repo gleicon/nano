@@ -53,10 +53,10 @@ Phases v1.0-01 through v1.0-05 delivered core JavaScript runtime with V8 isolate
 3. App A cannot access App B's environment variables
 4. Environment variables update when config is hot-reloaded
 
-**Plans:** TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] v1.2-01-01: TBD
+- [ ] v1.2-01-01-PLAN.md — Extend config parsing, pass env to fetch handler, verify isolation
 
 ### Phase v1.2-02: Streams Foundation
 
@@ -142,11 +142,11 @@ Plans:
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| v1.2-01. Per-App Env Vars | v1.2 | 0/0 | Not started | - |
+| v1.2-01. Per-App Env Vars | v1.2 | 0/1 | Ready | - |
 | v1.2-02. Streams Foundation | v1.2 | 0/0 | Not started | - |
 | v1.2-03. Response Body | v1.2 | 0/0 | Not started | - |
 | v1.2-04. Graceful Shutdown | v1.2 | 0/0 | Not started | - |
 | v1.2-05. Documentation | v1.2 | 0/0 | Not started | - |
 
 ---
-*Last updated: 2026-02-02 after v1.2 roadmap creation*
+*Last updated: 2026-02-02 after v1.2-01 planning*
