@@ -19,10 +19,10 @@
 
 ### Environment Variables
 
-- [ ] **ENVV-01**: Config JSON supports `env` object per app definition
-- [ ] **ENVV-02**: Environment variables injected as second parameter to fetch handler
-- [ ] **ENVV-03**: Complete isolation — app A cannot access app B's env vars
-- [ ] **ENVV-04**: Env vars updated on config reload (hot reload support)
+- [x] **ENVV-01**: Config JSON supports `env` object per app definition
+- [x] **ENVV-02**: Environment variables injected as second parameter to fetch handler
+- [x] **ENVV-03**: Complete isolation — app A cannot access app B's env vars
+- [x] **ENVV-04**: Env vars updated on config reload (hot reload support)
 
 ### Graceful Shutdown
 
@@ -67,10 +67,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ENVV-01 | v1.2-01 | Pending |
-| ENVV-02 | v1.2-01 | Pending |
-| ENVV-03 | v1.2-01 | Pending |
-| ENVV-04 | v1.2-01 | Pending |
+| ENVV-01 | v1.2-01 | Complete |
+| ENVV-02 | v1.2-01 | Complete |
+| ENVV-03 | v1.2-01 | Complete |
+| ENVV-04 | v1.2-01 | Complete |
 | STRM-01 | v1.2-02 | Pending |
 | STRM-02 | v1.2-02 | Pending |
 | STRM-03 | v1.2-02 | Pending |
