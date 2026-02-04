@@ -1,28 +1,28 @@
 const std = @import("std");
 
-/// Configuration for a single app
+/// Single App Configuration 
 pub const AppConfig = struct {
     name: []const u8,
     path: []const u8,
     hostname: []const u8, // Host header value for routing (e.g., "app-a.local")
-    port: u16, // Kept for backwards compatibility, ignored in multi-app mode
+    port: u16, // backwards compatibility, ignored in multi-app mode
     timeout_ms: u64,
     memory_mb: usize,
     env: ?std.StringHashMap([]const u8),
 };
 
-/// Default configuration values
+/// Default config
 pub const Defaults = struct {
     timeout_ms: u64 = 5000,
     memory_mb: usize = 128,
 };
 
-/// Root configuration structure
+/// Root config
 pub const Config = struct {
     apps: []AppConfig,
     defaults: Defaults,
     allocator: std.mem.Allocator,
-    port: u16, // Global port for virtual host mode (all apps share this port)
+    port: u16, // Global port for virtual host mode
 
     pub fn deinit(self: *Config) void {
         for (self.apps) |app| {
@@ -45,7 +45,6 @@ pub const Config = struct {
     }
 };
 
-/// Parse error types
 pub const ParseError = error{
     FileNotFound,
     InvalidJson,

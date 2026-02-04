@@ -2,7 +2,7 @@ const std = @import("std");
 const v8 = @import("v8");
 
 /// CPU watchdog for terminating long-running scripts
-/// Uses a separate thread to monitor execution time and terminate if exceeded
+/// Spawn a separate thread to monitor execution time and terminate if exceeded
 pub const Watchdog = struct {
     isolate: v8.Isolate,
     timeout_ms: u64,
@@ -10,7 +10,7 @@ pub const Watchdog = struct {
     should_stop: std.atomic.Value(bool),
     started: bool,
 
-    /// Initialize watchdog (does not start it)
+    /// Initialize watchdog
     pub fn init(isolate: v8.Isolate, timeout_ms: u64) Watchdog {
         return Watchdog{
             .isolate = isolate,

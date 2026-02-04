@@ -2,11 +2,11 @@ const std = @import("std");
 const xev = @import("xev");
 
 // Forward declaration for HttpServer reload callback
-// Using function pointer to avoid circular import with http module
+// with a function pointer to avoid circular import conflicts with http module
 pub const ReloadCallback = *const fn (*anyopaque) void;
 
 /// Config file watcher using poll-based mtime checking
-/// Polls config file every 2 seconds, triggers reload callback on changes
+/// Polls config file every 10 seconds, triggers reload callback on changes
 pub const ConfigWatcher = struct {
     timer: xev.Timer,
     completion: xev.Completion,
@@ -17,7 +17,7 @@ pub const ConfigWatcher = struct {
     reload_callback: ReloadCallback,
     active: bool,
 
-    const POLL_INTERVAL_MS: u64 = 2000; // Poll every 2 seconds
+    const POLL_INTERVAL_MS: u64 = 10000; // Poll every 10 seconds
     const DEBOUNCE_NS: i128 = 500_000_000; // 500ms debounce
 
     /// Initialize config watcher with path and server reference
