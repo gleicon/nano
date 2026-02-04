@@ -73,10 +73,12 @@ Plans:
 4. Backpressure signals work (desiredSize, ready promise)
 5. Stream errors propagate correctly through controllers
 
-**Plans:** TBD
+**Plans:** 3 plans in 2 waves
 
 Plans:
-- [ ] v1.2-02-01: TBD
+- [ ] v1.2-02-01-PLAN.md — ReadableStream foundation (Wave 1)
+- [ ] v1.2-02-02-PLAN.md — WritableStream foundation (Wave 1, parallel with 01)
+- [ ] v1.2-02-03-PLAN.md — TransformStream, pipe ops, utilities, text streams (Wave 2)
 
 ### Phase v1.2-03: Response Body Integration
 
@@ -143,10 +145,10 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | v1.2-01. Per-App Env Vars | v1.2 | 1/1 | ✓ Complete | 2026-02-02 |
-| v1.2-02. Streams Foundation | v1.2 | 0/0 | Not started | - |
+| v1.2-02. Streams Foundation | v1.2 | 0/3 | Ready for execution | - |
 | v1.2-03. Response Body | v1.2 | 0/0 | Not started | - |
 | v1.2-04. Graceful Shutdown | v1.2 | 0/0 | Not started | - |
 | v1.2-05. Documentation | v1.2 | 0/0 | Not started | - |
 
 ---
-*Last updated: 2026-02-02 after v1.2-01 execution*
+*Last updated: 2026-02-03 after v1.2-02 planning*
