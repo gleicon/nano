@@ -11,6 +11,8 @@ const request = @import("request");
 const abort = @import("abort");
 const blob = @import("blob");
 const formdata = @import("formdata");
+const readable_stream = @import("readable_stream");
+const writable_stream = @import("writable_stream");
 
 pub const ScriptError = error_mod.ScriptError;
 pub const extractError = error_mod.extractError;
@@ -70,6 +72,11 @@ pub fn runScript(
     abort.registerAbortAPI(isolate, context);
     blob.registerBlobAPI(isolate, context);
     formdata.registerFormDataAPI(isolate, context);
+
+    // Stream APIs - script engine uses default 64MB limit
+    const max_buffer_bytes: usize = 64 * 1024 * 1024;
+    readable_stream.registerReadableStreamAPI(isolate, context, max_buffer_bytes);
+    writable_stream.registerWritableStreamAPI(isolate, context, max_buffer_bytes);
 
     // Set up TryCatch for error handling - must be stack allocated
     var try_catch: v8.TryCatch = undefined;

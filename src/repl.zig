@@ -10,6 +10,8 @@ const request_api = @import("request");
 const abort = @import("abort");
 const blob = @import("blob");
 const formdata = @import("formdata");
+const readable_stream = @import("readable_stream");
+const writable_stream = @import("writable_stream");
 const posix = std.posix;
 
 /// Simple line editor with history support
@@ -336,6 +338,11 @@ pub fn runRepl() !void {
     abort.registerAbortAPI(isolate, context);
     blob.registerBlobAPI(isolate, context);
     formdata.registerFormDataAPI(isolate, context);
+
+    // Stream APIs - REPL uses default 64MB limit
+    const max_buffer_bytes: usize = 64 * 1024 * 1024;
+    readable_stream.registerReadableStreamAPI(isolate, context, max_buffer_bytes);
+    writable_stream.registerWritableStreamAPI(isolate, context, max_buffer_bytes);
 
     // Print banner
     stdout.writeAll("nano REPL (V8 ") catch {};

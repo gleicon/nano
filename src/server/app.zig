@@ -13,6 +13,8 @@ const watchdog = @import("watchdog");
 const abort = @import("abort");
 const blob = @import("blob");
 const formdata = @import("formdata");
+const readable_stream = @import("readable_stream");
+const writable_stream = @import("writable_stream");
 
 // Get the array buffer allocator type
 const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
@@ -176,7 +178,7 @@ fn transformExportDefault(allocator: std.mem.Allocator, source: []const u8) ![]c
 }
 
 /// Load an app from a folder path and compile the script
-pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allocator: ArrayBufferAllocator, app_config_env: ?std.StringHashMap([]const u8)) !App {
+pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allocator: ArrayBufferAllocator, app_config_env: ?std.StringHashMap([]const u8), max_buffer_size_mb: ?u64) !App {
     // Build path to index.js
     var path_buf: [4096]u8 = undefined;
     const index_path = std.fmt.bufPrint(&path_buf, "{s}/index.js", .{path}) catch {
@@ -235,6 +237,11 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
     abort.registerAbortAPI(isolate, context);
     blob.registerBlobAPI(isolate, context);
     formdata.registerFormDataAPI(isolate, context);
+
+    // Stream APIs - use configured max buffer size (default 64MB)
+    const max_buffer_bytes = (max_buffer_size_mb orelse 64) * 1024 * 1024;
+    readable_stream.registerReadableStreamAPI(isolate, context, max_buffer_bytes);
+    writable_stream.registerWritableStreamAPI(isolate, context, max_buffer_bytes);
 
     // Wrap and compile the script
     const wrapped_source_buf = allocator.alloc(u8, 1024 * 1024 + 1024) catch {
