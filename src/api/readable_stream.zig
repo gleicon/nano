@@ -27,7 +27,17 @@ pub fn registerReadableStreamAPI(isolate: v8.Isolate, context: v8.Context, max_b
         locked_getter,
     );
 
+    // Add Symbol.asyncIterator support
+    js.addMethod(stream_proto, isolate, "@@asyncIterator", readableStreamAsyncIterator);
+
+    // Register as global class
     js.addGlobalClass(global, context, isolate, "ReadableStream", stream_tmpl);
+
+    // Add static method ReadableStream.from()
+    const readable_stream_obj = js.getProp(global, context, isolate, "ReadableStream") catch return;
+    const readable_stream_constructor = js.asObject(readable_stream_obj);
+    const from_fn = v8.FunctionTemplate.initCallback(isolate, readableStreamFrom);
+    _ = js.setProp(readable_stream_constructor, context, isolate, "from", from_fn.getFunction(context).toValue());
 
     // Create ReadableStreamDefaultController constructor
     const controller_tmpl = v8.FunctionTemplate.initCallback(isolate, controllerConstructor);
@@ -409,6 +419,140 @@ fn readableStreamPipeThrough(raw_info: ?*const v8.C_FunctionCallbackInfo) callco
     var args = [_]v8.Value{ ctx.this.toValue(), transform, options };
     const result = pipe_fn.call(ctx.context, ctx.this.toValue(), &args) orelse {
         js.throw(ctx.isolate, "pipeThrough: call failed");
+        return;
+    };
+
+    js.ret(ctx, result);
+}
+
+fn readableStreamFrom(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
+    const ctx = js.CallbackContext.init(raw_info);
+
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "ReadableStream.from requires an iterable argument");
+        return;
+    }
+
+    // Use JavaScript to create stream from iterable
+    const from_code =
+        \\(function(iterable) {
+        \\  // Handle array case
+        \\  if (Array.isArray(iterable)) {
+        \\    let index = 0;
+        \\    return new ReadableStream({
+        \\      pull(controller) {
+        \\        if (index < iterable.length) {
+        \\          controller.enqueue(iterable[index++]);
+        \\        } else {
+        \\          controller.close();
+        \\        }
+        \\      }
+        \\    });
+        \\  }
+        \\
+        \\  // Handle iterable case
+        \\  if (iterable && typeof iterable[Symbol.iterator] === 'function') {
+        \\    const iterator = iterable[Symbol.iterator]();
+        \\    return new ReadableStream({
+        \\      pull(controller) {
+        \\        const result = iterator.next();
+        \\        if (result.done) {
+        \\          controller.close();
+        \\        } else {
+        \\          controller.enqueue(result.value);
+        \\        }
+        \\      }
+        \\    });
+        \\  }
+        \\
+        \\  // Handle async iterable case
+        \\  if (iterable && typeof iterable[Symbol.asyncIterator] === 'function') {
+        \\    const iterator = iterable[Symbol.asyncIterator]();
+        \\    return new ReadableStream({
+        \\      async pull(controller) {
+        \\        const result = await iterator.next();
+        \\        if (result.done) {
+        \\          controller.close();
+        \\        } else {
+        \\          controller.enqueue(result.value);
+        \\        }
+        \\      }
+        \\    });
+        \\  }
+        \\
+        \\  throw new TypeError('ReadableStream.from requires an iterable');
+        \\})
+    ;
+
+    const code_str = v8.String.initUtf8(ctx.isolate, from_code);
+    const script = v8.Script.compile(ctx.context, code_str, null) catch {
+        js.throw(ctx.isolate, "from: failed to compile");
+        return;
+    };
+
+    const from_fn_val = script.run(ctx.context) catch {
+        js.throw(ctx.isolate, "from: failed to run");
+        return;
+    };
+
+    if (!from_fn_val.isFunction()) {
+        js.throw(ctx.isolate, "from: not a function");
+        return;
+    }
+
+    const from_fn = v8.Function{ .handle = @ptrCast(from_fn_val.handle) };
+    var args = [_]v8.Value{ctx.arg(0)};
+    const result = from_fn.call(ctx.context, js.undefined_(ctx.isolate).toValue(), &args) orelse {
+        js.throw(ctx.isolate, "from: call failed");
+        return;
+    };
+
+    js.ret(ctx, result);
+}
+
+fn readableStreamAsyncIterator(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
+    const ctx = js.CallbackContext.init(raw_info);
+
+    // Return an async iterator for the stream
+    const iterator_code =
+        \\(function(stream) {
+        \\  const reader = stream.getReader();
+        \\  return {
+        \\    async next() {
+        \\      const result = await reader.read();
+        \\      return result;
+        \\    },
+        \\    async return() {
+        \\      reader.releaseLock();
+        \\      return { done: true };
+        \\    },
+        \\    [Symbol.asyncIterator]() {
+        \\      return this;
+        \\    }
+        \\  };
+        \\})
+    ;
+
+    const code_str = v8.String.initUtf8(ctx.isolate, iterator_code);
+    const script = v8.Script.compile(ctx.context, code_str, null) catch {
+        js.throw(ctx.isolate, "asyncIterator: failed to compile");
+        return;
+    };
+
+    const iterator_fn_val = script.run(ctx.context) catch {
+        js.throw(ctx.isolate, "asyncIterator: failed to run");
+        return;
+    };
+
+    if (!iterator_fn_val.isFunction()) {
+        js.throw(ctx.isolate, "asyncIterator: not a function");
+        return;
+    }
+
+    const iterator_fn = v8.Function{ .handle = @ptrCast(iterator_fn_val.handle) };
+    var args = [_]v8.Value{ctx.this.toValue()};
+    const result = iterator_fn.call(ctx.context, ctx.this.toValue(), &args) orelse {
+        js.throw(ctx.isolate, "asyncIterator: call failed");
         return;
     };
 
