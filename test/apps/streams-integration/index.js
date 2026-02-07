@@ -1,9 +1,10 @@
 export default {
   async fetch(request) {
     const url = new URL(request.url());
+    const pathname = url.pathname(); // pathname is a method in nano
 
     // Test 1: Transform stream pipeline
-    if (url.pathname === "/transform") {
+    if (pathname === "/transform") {
       const source = new ReadableStream({
         start(controller) {
           controller.enqueue("hello");
@@ -28,7 +29,7 @@ export default {
     }
 
     // Test 2: Tee operation
-    if (url.pathname === "/tee") {
+    if (pathname === "/tee") {
       const source = new ReadableStream({
         start(controller) {
           controller.enqueue("a");
@@ -54,7 +55,7 @@ export default {
     }
 
     // Test 3: ReadableStream.from()
-    if (url.pathname === "/from") {
+    if (pathname === "/from") {
       const stream = ReadableStream.from([1, 2, 3, 4, 5]);
       const chunks = [];
       await stream.pipeTo(new WritableStream({
@@ -64,7 +65,7 @@ export default {
     }
 
     // Test 4: Text streams
-    if (url.pathname === "/text-streams") {
+    if (pathname === "/text-streams") {
       const source = new ReadableStream({
         start(controller) {
           controller.enqueue("Hello");

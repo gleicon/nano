@@ -908,6 +908,7 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
             _ = js.setProp(result, ctx.context, ctx.isolate, "value", chunk);
             _ = js.setProp(result, ctx.context, ctx.isolate, "done", v8.Value{ .handle = js.boolean(ctx.isolate, false).handle });
             const resolver = v8.PromiseResolver.init(ctx.context);
+            _ = resolver.resolve(ctx.context, result.toValue());
             js.ret(ctx, resolver.getPromise());
             return;
         };
@@ -926,6 +927,7 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         _ = js.setProp(result, ctx.context, ctx.isolate, "done", v8.Value{ .handle = js.boolean(ctx.isolate, false).handle });
 
         const resolver = v8.PromiseResolver.init(ctx.context);
+        _ = resolver.resolve(ctx.context, result.toValue());
         js.ret(ctx, resolver.getPromise());
         return;
     }
@@ -937,6 +939,7 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         _ = js.setProp(result, ctx.context, ctx.isolate, "done", v8.Value{ .handle = js.boolean(ctx.isolate, true).handle });
 
         const resolver = v8.PromiseResolver.init(ctx.context);
+        _ = resolver.resolve(ctx.context, result.toValue());
         js.ret(ctx, resolver.getPromise());
         return;
     }
