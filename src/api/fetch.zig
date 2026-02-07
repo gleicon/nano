@@ -115,6 +115,9 @@ pub fn registerFetchAPI(isolate: v8.Isolate, context: v8.Context) void {
     const headers_fn = v8.FunctionTemplate.initCallback(isolate, responseHeaders);
     response_proto.set(v8.String.initUtf8(isolate, "headers").toName(), headers_fn, v8.PropertyAttribute.None);
 
+    const body_fn = v8.FunctionTemplate.initCallback(isolate, responseBody);
+    response_proto.set(v8.String.initUtf8(isolate, "body").toName(), body_fn, v8.PropertyAttribute.None);
+
     const text_fn = v8.FunctionTemplate.initCallback(isolate, responseText);
     response_proto.set(v8.String.initUtf8(isolate, "text").toName(), text_fn, v8.PropertyAttribute.None);
 
@@ -435,11 +438,30 @@ fn responseConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c)
     if (info.length() >= 1) {
         const body_arg = info.getArg(0);
         if (!body_arg.isNull() and !body_arg.isUndefined()) {
-            const body_str = body_arg.toString(context) catch {
-                _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), v8.String.initUtf8(isolate, "").toValue());
-                return;
-            };
-            _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), body_str.toValue());
+            // Check if body is a ReadableStream (has 'locked' property)
+            if (body_arg.isObject()) {
+                const body_obj = v8.Object{ .handle = @ptrCast(body_arg.handle) };
+                const locked_val = body_obj.getValue(context, v8.String.initUtf8(isolate, "locked")) catch null;
+                if (locked_val != null) {
+                    // It's a ReadableStream - store directly
+                    _ = this.setValue(context, v8.String.initUtf8(isolate, "_bodyStream"), body_arg);
+                    _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), v8.String.initUtf8(isolate, "").toValue());
+                } else {
+                    // Regular object - convert to string
+                    const body_str = body_arg.toString(context) catch {
+                        _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), v8.String.initUtf8(isolate, "").toValue());
+                        return;
+                    };
+                    _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), body_str.toValue());
+                }
+            } else {
+                // String or primitive - convert to string
+                const body_str = body_arg.toString(context) catch {
+                    _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), v8.String.initUtf8(isolate, "").toValue());
+                    return;
+                };
+                _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), body_str.toValue());
+            }
         } else {
             _ = this.setValue(context, v8.String.initUtf8(isolate, "_body"), v8.String.initUtf8(isolate, "").toValue());
         }
@@ -554,17 +576,168 @@ fn responseHeaders(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
     info.getReturnValue().set(hdrs_val);
 }
 
+fn responseBody(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
+    const isolate = info.getIsolate();
+    const context = isolate.getCurrentContext();
+    const this = info.getThis();
+
+    // Check if _bodyStream already exists (stream was provided in constructor or cached)
+    const stream_val = this.getValue(context, v8.String.initUtf8(isolate, "_bodyStream")) catch null;
+    if (stream_val != null and !stream_val.?.isUndefined()) {
+        info.getReturnValue().set(stream_val.?);
+        return;
+    }
+
+    // Check if _body is empty
+    const body_val = this.getValue(context, v8.String.initUtf8(isolate, "_body")) catch {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    };
+
+    const body_str = body_val.toString(context) catch {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    };
+
+    var body_buf: [65536]u8 = undefined;
+    const body_len = body_str.writeUtf8(isolate, &body_buf);
+    const body = body_buf[0..body_len];
+
+    // If body is empty, return null
+    if (body.len == 0) {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    }
+
+    // Create a ReadableStream from the string body
+    // Get ReadableStream constructor
+    const global = context.getGlobal();
+    const rs_ctor_val = global.getValue(context, v8.String.initUtf8(isolate, "ReadableStream")) catch {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    };
+    const rs_ctor = v8.Function{ .handle = @ptrCast(rs_ctor_val.handle) };
+
+    // Create an underlying source with start(controller) callback
+    // We need to create a JavaScript function that enqueues the body and closes
+    const source_code =
+        \\(function(bodyString) {
+        \\  return {
+        \\    start(controller) {
+        \\      controller.enqueue(bodyString);
+        \\      controller.close();
+        \\    }
+        \\  };
+        \\})
+    ;
+
+    const source_fn_str = v8.String.initUtf8(isolate, source_code);
+    var source_script = v8.Script.compile(context, source_fn_str, null) catch {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    };
+    const source_factory_val = source_script.run(context) catch {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    };
+    const source_factory = v8.Function{ .handle = @ptrCast(source_factory_val.handle) };
+
+    // Call factory with body string
+    var factory_args: [1]v8.Value = .{v8.String.initUtf8(isolate, body).toValue()};
+    const source_val = source_factory.call(context, isolate.initUndefined().toValue(), &factory_args) orelse {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    };
+
+    // Create ReadableStream with the source
+    var ctor_args: [1]v8.Value = .{source_val};
+    const stream = rs_ctor.initInstance(context, &ctor_args) orelse {
+        info.getReturnValue().set(isolate.initNull().toValue());
+        return;
+    };
+
+    // Cache the stream
+    _ = this.setValue(context, v8.String.initUtf8(isolate, "_bodyStream"), v8.Value{ .handle = @ptrCast(stream.handle) });
+
+    info.getReturnValue().set(v8.Value{ .handle = @ptrCast(stream.handle) });
+}
+
 fn responseText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
     const isolate = info.getIsolate();
     const context = isolate.getCurrentContext();
     const this = info.getThis();
 
+    // Check if _bodyStream exists (body was a stream or was consumed as stream)
+    const stream_val = this.getValue(context, v8.String.initUtf8(isolate, "_bodyStream")) catch null;
+    if (stream_val != null and !stream_val.?.isUndefined()) {
+        // Read from stream
+        const stream_obj = v8.Object{ .handle = @ptrCast(stream_val.?.handle) };
+
+        // Get the getReader method
+        const get_reader_val = stream_obj.getValue(context, v8.String.initUtf8(isolate, "getReader")) catch {
+            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: stream has no getReader").toValue());
+            return;
+        };
+        const get_reader_fn = v8.Function{ .handle = @ptrCast(get_reader_val.handle) };
+
+        // Call getReader()
+        const reader_val = get_reader_fn.call(context, stream_val.?, &[_]v8.Value{}) orelse {
+            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: getReader failed").toValue());
+            return;
+        };
+
+        // Read all chunks using JavaScript helper
+        const reader_code =
+            \\(async function(reader) {
+            \\  const chunks = [];
+            \\  while (true) {
+            \\    const {done, value} = await reader.read();
+            \\    if (done) break;
+            \\    chunks.push(value);
+            \\  }
+            \\  await reader.releaseLock();
+            \\  return chunks.join('');
+            \\})
+        ;
+
+        const reader_fn_str = v8.String.initUtf8(isolate, reader_code);
+        var reader_script = v8.Script.compile(context, reader_fn_str, null) catch {
+            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: failed to compile reader").toValue());
+            return;
+        };
+        const reader_factory_val = reader_script.run(context) catch {
+            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: failed to run reader factory").toValue());
+            return;
+        };
+        const reader_factory = v8.Function{ .handle = @ptrCast(reader_factory_val.handle) };
+
+        // Call the async function with reader
+        var reader_args: [1]v8.Value = .{reader_val};
+        const result_promise_val = reader_factory.call(context, isolate.initUndefined().toValue(), &reader_args) orelse {
+            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: reader function failed").toValue());
+            return;
+        };
+
+        // Return the promise
+        info.getReturnValue().set(result_promise_val);
+        return;
+    }
+
+    // No stream - use _body string (backwards compatibility)
     const body_val = this.getValue(context, v8.String.initUtf8(isolate, "_body")) catch {
-        info.getReturnValue().set(v8.String.initUtf8(isolate, "").toValue());
+        // Return a promise that resolves to empty string for consistency
+        const resolver = v8.PromiseResolver.init(context);
+        _ = resolver.resolve(context, v8.String.initUtf8(isolate, "").toValue());
+        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(resolver.getPromise().handle) });
         return;
     };
-    info.getReturnValue().set(body_val);
+
+    // Return a promise that resolves to the body string
+    const resolver = v8.PromiseResolver.init(context);
+    _ = resolver.resolve(context, body_val);
+    info.getReturnValue().set(v8.Value{ .handle = @ptrCast(resolver.getPromise().handle) });
 }
 
 fn responseJson(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
@@ -573,41 +746,44 @@ fn responseJson(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const context = isolate.getCurrentContext();
     const this = info.getThis();
 
-    const body_val = this.getValue(context, v8.String.initUtf8(isolate, "_body")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: no body").toValue());
+    // Call this.text() to get body as string (handles both stream and string bodies)
+    const text_fn_val = this.getValue(context, v8.String.initUtf8(isolate, "text")) catch {
+        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: text method not found").toValue());
+        return;
+    };
+    const text_fn = v8.Function{ .handle = @ptrCast(text_fn_val.handle) };
+
+    const text_promise_val = text_fn.call(context, v8.Value{ .handle = @ptrCast(this.handle) }, &[_]v8.Value{}) orelse {
+        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: text() failed").toValue());
         return;
     };
 
-    const body_str = body_val.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: invalid body").toValue());
+    // Create a promise that resolves with parsed JSON
+    const json_code =
+        \\(async function(textPromise) {
+        \\  const text = await textPromise;
+        \\  return JSON.parse(text);
+        \\})
+    ;
+
+    const json_fn_str = v8.String.initUtf8(isolate, json_code);
+    var json_script = v8.Script.compile(context, json_fn_str, null) catch {
+        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: failed to compile parser").toValue());
+        return;
+    };
+    const json_factory_val = json_script.run(context) catch {
+        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: failed to run parser factory").toValue());
+        return;
+    };
+    const json_factory = v8.Function{ .handle = @ptrCast(json_factory_val.handle) };
+
+    var json_args: [1]v8.Value = .{text_promise_val};
+    const result_val = json_factory.call(context, isolate.initUndefined().toValue(), &json_args) orelse {
+        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: parser function failed").toValue());
         return;
     };
 
-    var body_buf: [65536]u8 = undefined;
-    const body_len = body_str.writeUtf8(isolate, &body_buf);
-    const body = body_buf[0..body_len];
-
-    // Use V8's JSON.parse
-    const global = context.getGlobal();
-    const json_val = global.getValue(context, v8.String.initUtf8(isolate, "JSON")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: JSON not found").toValue());
-        return;
-    };
-
-    const json_obj = v8.Object{ .handle = @ptrCast(json_val.handle) };
-    const parse_fn_val = json_obj.getValue(context, v8.String.initUtf8(isolate, "parse")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: JSON.parse not found").toValue());
-        return;
-    };
-
-    const parse_fn = v8.Function{ .handle = @ptrCast(parse_fn_val.handle) };
-    var args: [1]v8.Value = .{v8.String.initUtf8(isolate, body).toValue()};
-    const result = parse_fn.call(context, json_val, &args) orelse {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: parse failed").toValue());
-        return;
-    };
-
-    info.getReturnValue().set(result);
+    info.getReturnValue().set(result_val);
 }
 
 // Static method: Response.json(data, options)
