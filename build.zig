@@ -135,6 +135,15 @@ pub fn build(b: *std.Build) void {
     writable_stream_module.addImport("v8", v8_module);
     writable_stream_module.addImport("js", js_module);
 
+    // Create api/transform_stream module
+    const transform_stream_module = b.createModule(.{
+        .root_source_file = b.path("src/api/transform_stream.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    transform_stream_module.addImport("v8", v8_module);
+    transform_stream_module.addImport("js", js_module);
+
     // Create log module
     const log_module = b.createModule(.{
         .root_source_file = b.path("src/log.zig"),
@@ -203,6 +212,7 @@ pub fn build(b: *std.Build) void {
     script_module.addImport("formdata", formdata_module);
     script_module.addImport("readable_stream", readable_stream_module);
     script_module.addImport("writable_stream", writable_stream_module);
+    script_module.addImport("transform_stream", transform_stream_module);
 
     // Create repl module
     const repl_module = b.createModule(.{
@@ -225,6 +235,7 @@ pub fn build(b: *std.Build) void {
     repl_module.addImport("formdata", formdata_module);
     repl_module.addImport("readable_stream", readable_stream_module);
     repl_module.addImport("writable_stream", writable_stream_module);
+    repl_module.addImport("transform_stream", transform_stream_module);
 
     // Create server/app module (with V8 dependency)
     const app_module = b.createModule(.{
@@ -248,6 +259,7 @@ pub fn build(b: *std.Build) void {
     app_module.addImport("formdata", formdata_module);
     app_module.addImport("readable_stream", readable_stream_module);
     app_module.addImport("writable_stream", writable_stream_module);
+    app_module.addImport("transform_stream", transform_stream_module);
 
     // Create server/metrics module
     const metrics_module = b.createModule(.{

@@ -15,6 +15,7 @@ const blob = @import("blob");
 const formdata = @import("formdata");
 const readable_stream = @import("readable_stream");
 const writable_stream = @import("writable_stream");
+const transform_stream = @import("transform_stream");
 
 // Get the array buffer allocator type
 const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
@@ -242,6 +243,7 @@ pub fn loadApp(allocator: std.mem.Allocator, path: []const u8, array_buffer_allo
     const max_buffer_bytes = (max_buffer_size_mb orelse 64) * 1024 * 1024;
     readable_stream.registerReadableStreamAPI(isolate, context, max_buffer_bytes);
     writable_stream.registerWritableStreamAPI(isolate, context, max_buffer_bytes);
+    transform_stream.registerTransformStreamAPI(isolate, context);
 
     // Wrap and compile the script
     const wrapped_source_buf = allocator.alloc(u8, 1024 * 1024 + 1024) catch {
