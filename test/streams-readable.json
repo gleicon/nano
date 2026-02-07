@@ -1,0 +1,11 @@
+{
+  "port": 8080,
+  "apps": [
+    {
+      "name": "readable-test",
+      "hostname": "readable.local",
+      "path": "test/apps/readable-test",
+      "max_buffer_size_mb": 1
+    }
+  ]
+}
