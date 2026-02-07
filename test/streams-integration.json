@@ -1,0 +1,10 @@
+{
+  "port": 8080,
+  "apps": [
+    {
+      "name": "streams-integration",
+      "hostname": "streams.local",
+      "path": "test/apps/streams-integration"
+    }
+  ]
+}
