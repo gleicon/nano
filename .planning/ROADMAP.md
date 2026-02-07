@@ -32,7 +32,7 @@ Phases v1.0-01 through v1.0-05 delivered core JavaScript runtime with V8 isolate
 **Milestone Goal:** Add Streams API, environment variables, graceful shutdown, and documentation
 
 - [x] **Phase v1.2-01: Per-App Environment Variables** - Isolated config per app
-- [ ] **Phase v1.2-02: Streams Foundation** - ReadableStream/WritableStream core
+- [x] **Phase v1.2-02: Streams Foundation** - ReadableStream/WritableStream core
 - [ ] **Phase v1.2-03: Response Body Integration** - Streaming HTTP responses
 - [ ] **Phase v1.2-04: Graceful Shutdown** - Connection draining on app removal and process shutdown
 - [ ] **Phase v1.2-05: Documentation Site** - Astro + Starlight with WinterCG reference
@@ -76,9 +76,9 @@ Plans:
 **Plans:** 3 plans in 2 waves
 
 Plans:
-- [ ] v1.2-02-01-PLAN.md — ReadableStream foundation (Wave 1)
-- [ ] v1.2-02-02-PLAN.md — WritableStream foundation (Wave 1, parallel with 01)
-- [ ] v1.2-02-03-PLAN.md — TransformStream, pipe ops, utilities, text streams (Wave 2)
+- [x] v1.2-02-01-PLAN.md — ReadableStream foundation (Wave 1)
+- [x] v1.2-02-02-PLAN.md — WritableStream foundation (Wave 1, parallel with 01)
+- [x] v1.2-02-03-PLAN.md — TransformStream, pipe ops, utilities, text streams (Wave 2)
 
 ### Phase v1.2-03: Response Body Integration
 
@@ -93,10 +93,10 @@ Plans:
 2. fetch() Response supports streaming consumption via .body.getReader()
 3. Large responses can stream without buffering entire content
 
-**Plans:** TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] v1.2-03-01: TBD
+- [ ] v1.2-03-01-PLAN.md — Extend Response with .body getter, ReadableStream constructor support, streaming text()/json()
 
 ### Phase v1.2-04: Graceful Shutdown
 
@@ -145,10 +145,10 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | v1.2-01. Per-App Env Vars | v1.2 | 1/1 | ✓ Complete | 2026-02-02 |
-| v1.2-02. Streams Foundation | v1.2 | 0/3 | Ready for execution | - |
-| v1.2-03. Response Body | v1.2 | 0/0 | Not started | - |
+| v1.2-02. Streams Foundation | v1.2 | 3/3 | ✓ Complete | 2026-02-07 |
+| v1.2-03. Response Body | v1.2 | 0/1 | Ready for execution | - |
 | v1.2-04. Graceful Shutdown | v1.2 | 0/0 | Not started | - |
 | v1.2-05. Documentation | v1.2 | 0/0 | Not started | - |
 
 ---
-*Last updated: 2026-02-03 after v1.2-02 planning*
+*Last updated: 2026-02-07 after v1.2-03 planning*
