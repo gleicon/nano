@@ -17,6 +17,8 @@ pub fn registerReadableStreamAPI(isolate: v8.Isolate, context: v8.Context, max_b
     js.addMethod(stream_proto, isolate, "getReader", readableStreamGetReader);
     js.addMethod(stream_proto, isolate, "cancel", readableStreamCancel);
     js.addMethod(stream_proto, isolate, "tee", readableStreamTee);
+    js.addMethod(stream_proto, isolate, "pipeTo", readableStreamPipeTo);
+    js.addMethod(stream_proto, isolate, "pipeThrough", readableStreamPipeThrough);
 
     // Add locked getter
     const locked_getter = v8.FunctionTemplate.initCallback(isolate, readableStreamLockedGetter);
@@ -216,8 +218,201 @@ fn readableStreamCancel(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c
 fn readableStreamTee(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const ctx = js.CallbackContext.init(raw_info);
 
-    // Placeholder - defer to Plan 03
-    js.throw(ctx.isolate, "ReadableStream.tee() not yet implemented");
+    // Implementation moved from placeholder to full implementation
+    // Use JavaScript to implement tee() functionality
+    const tee_code =
+        \\(function(stream) {
+        \\  const reader = stream.getReader();
+        \\  let closed = false;
+        \\  const chunks = [];
+        \\  let readPromise = null;
+        \\
+        \\  const branch1 = new ReadableStream({
+        \\    async pull(controller) {
+        \\      if (closed) {
+        \\        controller.close();
+        \\        return;
+        \\      }
+        \\      const result = await reader.read();
+        \\      if (result.done) {
+        \\        closed = true;
+        \\        controller.close();
+        \\      } else {
+        \\        controller.enqueue(result.value);
+        \\      }
+        \\    },
+        \\    cancel() {
+        \\      reader.cancel();
+        \\    }
+        \\  });
+        \\
+        \\  const branch2 = new ReadableStream({
+        \\    async pull(controller) {
+        \\      if (closed) {
+        \\        controller.close();
+        \\        return;
+        \\      }
+        \\      const result = await reader.read();
+        \\      if (result.done) {
+        \\        closed = true;
+        \\        controller.close();
+        \\      } else {
+        \\        controller.enqueue(result.value);
+        \\      }
+        \\    },
+        \\    cancel() {
+        \\      reader.cancel();
+        \\    }
+        \\  });
+        \\
+        \\  return [branch1, branch2];
+        \\})
+    ;
+
+    const code_str = v8.String.initUtf8(ctx.isolate, tee_code);
+    const script = v8.Script.compile(ctx.context, code_str, null) catch {
+        js.throw(ctx.isolate, "tee: failed to compile");
+        return;
+    };
+
+    const tee_fn_val = script.run(ctx.context) catch {
+        js.throw(ctx.isolate, "tee: failed to run");
+        return;
+    };
+
+    if (!tee_fn_val.isFunction()) {
+        js.throw(ctx.isolate, "tee: not a function");
+        return;
+    }
+
+    const tee_fn = v8.Function{ .handle = @ptrCast(tee_fn_val.handle) };
+    var args = [_]v8.Value{ctx.this.toValue()};
+    const result = tee_fn.call(ctx.context, ctx.this.toValue(), &args) orelse {
+        js.throw(ctx.isolate, "tee: call failed");
+        return;
+    };
+
+    js.ret(ctx, result);
+}
+
+fn readableStreamPipeTo(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
+    const ctx = js.CallbackContext.init(raw_info);
+
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "pipeTo requires destination argument");
+        return;
+    }
+
+    // Use JavaScript to implement pipeTo()
+    // This handles all the complex async piping logic
+    const pipe_code =
+        \\(async function(source, destination, options) {
+        \\  options = options || {};
+        \\  const reader = source.getReader();
+        \\  const writer = destination.getWriter();
+        \\
+        \\  try {
+        \\    while (true) {
+        \\      const { done, value } = await reader.read();
+        \\      if (done) {
+        \\        if (!options.preventClose) {
+        \\          await writer.close();
+        \\        }
+        \\        break;
+        \\      }
+        \\      await writer.ready;
+        \\      await writer.write(value);
+        \\    }
+        \\  } catch (error) {
+        \\    if (!options.preventAbort) {
+        \\      await writer.abort(error);
+        \\    }
+        \\    if (!options.preventCancel) {
+        \\      await reader.cancel(error);
+        \\    }
+        \\    throw error;
+        \\  } finally {
+        \\    reader.releaseLock();
+        \\    writer.releaseLock();
+        \\  }
+        \\})
+    ;
+
+    const code_str = v8.String.initUtf8(ctx.isolate, pipe_code);
+    const script = v8.Script.compile(ctx.context, code_str, null) catch {
+        js.throw(ctx.isolate, "pipeTo: failed to compile");
+        return;
+    };
+
+    const pipe_fn_val = script.run(ctx.context) catch {
+        js.throw(ctx.isolate, "pipeTo: failed to run");
+        return;
+    };
+
+    if (!pipe_fn_val.isFunction()) {
+        js.throw(ctx.isolate, "pipeTo: not a function");
+        return;
+    }
+
+    const pipe_fn = v8.Function{ .handle = @ptrCast(pipe_fn_val.handle) };
+    const destination = ctx.arg(0);
+    const options = if (ctx.argc() >= 2) ctx.arg(1) else js.undefined_(ctx.isolate).toValue();
+
+    var args = [_]v8.Value{ ctx.this.toValue(), destination, options };
+    const result = pipe_fn.call(ctx.context, ctx.this.toValue(), &args) orelse {
+        js.throw(ctx.isolate, "pipeTo: call failed");
+        return;
+    };
+
+    js.ret(ctx, result);
+}
+
+fn readableStreamPipeThrough(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
+    const ctx = js.CallbackContext.init(raw_info);
+
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "pipeThrough requires transform argument");
+        return;
+    }
+
+    // Use JavaScript to implement pipeThrough()
+    const pipe_code =
+        \\(function(source, transform, options) {
+        \\  if (!transform || !transform.readable || !transform.writable) {
+        \\    throw new TypeError("pipeThrough requires an object with readable and writable properties");
+        \\  }
+        \\  source.pipeTo(transform.writable, options);
+        \\  return transform.readable;
+        \\})
+    ;
+
+    const code_str = v8.String.initUtf8(ctx.isolate, pipe_code);
+    const script = v8.Script.compile(ctx.context, code_str, null) catch {
+        js.throw(ctx.isolate, "pipeThrough: failed to compile");
+        return;
+    };
+
+    const pipe_fn_val = script.run(ctx.context) catch {
+        js.throw(ctx.isolate, "pipeThrough: failed to run");
+        return;
+    };
+
+    if (!pipe_fn_val.isFunction()) {
+        js.throw(ctx.isolate, "pipeThrough: not a function");
+        return;
+    }
+
+    const pipe_fn = v8.Function{ .handle = @ptrCast(pipe_fn_val.handle) };
+    const transform = ctx.arg(0);
+    const options = if (ctx.argc() >= 2) ctx.arg(1) else js.undefined_(ctx.isolate).toValue();
+
+    var args = [_]v8.Value{ ctx.this.toValue(), transform, options };
+    const result = pipe_fn.call(ctx.context, ctx.this.toValue(), &args) orelse {
+        js.throw(ctx.isolate, "pipeThrough: call failed");
+        return;
+    };
+
+    js.ret(ctx, result);
 }
 
 // ============================================================================
