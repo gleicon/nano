@@ -610,57 +610,46 @@ fn responseBody(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         return;
     }
 
-    // Create a ReadableStream from the string body
-    // Get ReadableStream constructor
-    const global = context.getGlobal();
-    const rs_ctor_val = global.getValue(context, v8.String.initUtf8(isolate, "ReadableStream")) catch {
-        info.getReturnValue().set(isolate.initNull().toValue());
-        return;
-    };
-    const rs_ctor = v8.Function{ .handle = @ptrCast(rs_ctor_val.handle) };
-
-    // Create an underlying source with start(controller) callback
-    // We need to create a JavaScript function that enqueues the body and closes
-    const source_code =
-        \\(function(bodyString) {
-        \\  return {
-        \\    start(controller) {
-        \\      controller.enqueue(bodyString);
-        \\      controller.close();
+    // Create a ReadableStream from the string body using pull() instead of start()
+    // pull() is called on-demand rather than synchronously, avoiding blocking
+    const create_stream_code =
+        \\(bodyString) => {
+        \\  let sent = false;
+        \\  return new ReadableStream({
+        \\    pull(controller) {
+        \\      if (!sent) {
+        \\        controller.enqueue(bodyString);
+        \\        sent = true;
+        \\        controller.close();
+        \\      }
         \\    }
-        \\  };
-        \\})
+        \\  });
+        \\}
     ;
 
-    const source_fn_str = v8.String.initUtf8(isolate, source_code);
-    var source_script = v8.Script.compile(context, source_fn_str, null) catch {
+    const global = context.getGlobal();
+    const create_fn_str = v8.String.initUtf8(isolate, create_stream_code);
+    var create_script = v8.Script.compile(context, create_fn_str, null) catch {
         info.getReturnValue().set(isolate.initNull().toValue());
         return;
     };
-    const source_factory_val = source_script.run(context) catch {
+    const create_fn_val = create_script.run(context) catch {
         info.getReturnValue().set(isolate.initNull().toValue());
         return;
     };
-    const source_factory = v8.Function{ .handle = @ptrCast(source_factory_val.handle) };
+    const create_fn = v8.Function{ .handle = @ptrCast(create_fn_val.handle) };
 
-    // Call factory with body string
-    var factory_args: [1]v8.Value = .{v8.String.initUtf8(isolate, body).toValue()};
-    const source_val = source_factory.call(context, isolate.initUndefined().toValue(), &factory_args) orelse {
-        info.getReturnValue().set(isolate.initNull().toValue());
-        return;
-    };
-
-    // Create ReadableStream with the source
-    var ctor_args: [1]v8.Value = .{source_val};
-    const stream = rs_ctor.initInstance(context, &ctor_args) orelse {
+    // Call create function with body string
+    var args: [1]v8.Value = .{v8.String.initUtf8(isolate, body).toValue()};
+    const stream_val_new = create_fn.call(context, global, &args) orelse {
         info.getReturnValue().set(isolate.initNull().toValue());
         return;
     };
 
     // Cache the stream
-    _ = this.setValue(context, v8.String.initUtf8(isolate, "_bodyStream"), v8.Value{ .handle = @ptrCast(stream.handle) });
+    _ = this.setValue(context, v8.String.initUtf8(isolate, "_bodyStream"), stream_val_new);
 
-    info.getReturnValue().set(v8.Value{ .handle = @ptrCast(stream.handle) });
+    info.getReturnValue().set(stream_val_new);
 }
 
 fn responseText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
