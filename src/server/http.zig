@@ -77,7 +77,7 @@ pub const HttpServer = struct {
         // Set global event loop reference BEFORE loading app (app init may use timers)
         timers.setEventLoop(&self.event_loop);
 
-        self.app = app_module.loadApp(self.allocator, app_path, self.array_buffer_allocator, null) catch |err| {
+        self.app = app_module.loadApp(self.allocator, app_path, self.array_buffer_allocator, null, null) catch |err| {
             logError("Failed to load app", app_path, err);
             return err;
         };
@@ -97,7 +97,7 @@ pub const HttpServer = struct {
 
         for (cfg.apps) |app_cfg| {
             // Load the app
-            var loaded_app = app_module.loadApp(self.allocator, app_cfg.path, self.array_buffer_allocator, app_cfg.env) catch |err| {
+            var loaded_app = app_module.loadApp(self.allocator, app_cfg.path, self.array_buffer_allocator, app_cfg.env, app_cfg.max_buffer_size_mb) catch |err| {
                 logError("Failed to load app", app_cfg.name, err);
                 continue; // Skip failed apps, continue loading others
             };
@@ -284,7 +284,7 @@ pub const HttpServer = struct {
         var logger = log.stdout();
 
         // Load the app
-        var loaded_app = app_module.loadApp(self.allocator, app_cfg.path, self.array_buffer_allocator, app_cfg.env) catch |err| {
+        var loaded_app = app_module.loadApp(self.allocator, app_cfg.path, self.array_buffer_allocator, app_cfg.env, app_cfg.max_buffer_size_mb) catch |err| {
             logError("Failed to load app", app_cfg.name, err);
             return err;
         };
@@ -727,6 +727,7 @@ pub const HttpServer = struct {
             .timeout_ms = timeout,
             .memory_mb = memory,
             .env = null,
+            .max_buffer_size_mb = null,
         };
 
         self.addApp(app_cfg) catch |err| {

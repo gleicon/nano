@@ -1,6 +1,6 @@
 const std = @import("std");
 
-/// Single App Configuration 
+/// Single App Configuration
 pub const AppConfig = struct {
     name: []const u8,
     path: []const u8,
@@ -9,6 +9,7 @@ pub const AppConfig = struct {
     timeout_ms: u64,
     memory_mb: usize,
     env: ?std.StringHashMap([]const u8),
+    max_buffer_size_mb: ?u64, // Max stream buffer size in MB (null = use default 64MB)
 };
 
 /// Default config
@@ -166,6 +167,7 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
         // Optional fields with defaults
         var timeout_ms = defaults.timeout_ms;
         var memory_mb = defaults.memory_mb;
+        var max_buffer_size_mb: ?u64 = null;
 
         if (app_obj.get("timeout_ms")) |timeout| {
             if (timeout == .integer) {
@@ -175,6 +177,11 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
         if (app_obj.get("memory_mb")) |memory| {
             if (memory == .integer) {
                 memory_mb = @intCast(memory.integer);
+            }
+        }
+        if (app_obj.get("max_buffer_size_mb")) |max_buffer| {
+            if (max_buffer == .integer) {
+                max_buffer_size_mb = @intCast(max_buffer.integer);
             }
         }
 
@@ -222,6 +229,7 @@ pub fn parseConfig(allocator: std.mem.Allocator, json_content: []const u8) Parse
             .timeout_ms = timeout_ms,
             .memory_mb = memory_mb,
             .env = env_map,
+            .max_buffer_size_mb = max_buffer_size_mb,
         };
         i += 1;
     }
