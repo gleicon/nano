@@ -1,0 +1,13 @@
+{
+  "port": 3000,
+  "apps": [
+    {
+      "name": "response-body-test",
+      "hostname": "localhost",
+      "path": "test/apps/response-body-test",
+      "memory_limit_mb": 128,
+      "cpu_timeout_ms": 5000,
+      "max_buffer_size_mb": 1
+    }
+  ]
+}
