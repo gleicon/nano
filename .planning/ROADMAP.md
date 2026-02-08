@@ -113,10 +113,11 @@ Plans:
 4. New requests to draining app receive 503 Service Unavailable
 5. Process exits after drain timeout (30s default) even if connections hang
 
-**Plans:** TBD
+**Plans:** 2 plans in 2 waves
 
 Plans:
-- [ ] v1.2-04-01: TBD
+- [ ] v1.2-04-01-PLAN.md — AppDrainState struct, per-app connection tracking infrastructure (Wave 1)
+- [ ] v1.2-04-02-PLAN.md — 503 drain routing, removeApp drain-wait, stop() graceful shutdown sequence (Wave 2)
 
 ### Phase v1.2-05: Documentation Site
 
@@ -147,8 +148,8 @@ Plans:
 | v1.2-01. Per-App Env Vars | v1.2 | 1/1 | ✓ Complete | 2026-02-02 |
 | v1.2-02. Streams Foundation | v1.2 | 3/3 | ✓ Complete | 2026-02-07 |
 | v1.2-03. Response Body | v1.2 | 1/1 | ✓ Complete | 2026-02-07 |
-| v1.2-04. Graceful Shutdown | v1.2 | 0/0 | Not started | - |
+| v1.2-04. Graceful Shutdown | v1.2 | 0/2 | Not started | - |
 | v1.2-05. Documentation | v1.2 | 0/0 | Not started | - |
 
 ---
-*Last updated: 2026-02-07 after v1.2-03 execution*
+*Last updated: 2026-02-07 after v1.2-04 planning*
