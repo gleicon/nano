@@ -5,18 +5,18 @@
 See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
-**Current focus:** Phase v1.2-02 Streams Foundation COMPLETE
+**Current focus:** Phase v1.2-03 Response Body Integration COMPLETE
 
 ## Current Position
 
-Phase: v1.2-02 of 5 (Streams Foundation)
-Plan: 3 of 3 complete
-Status: Phase complete - ready for v1.2-03
-Last activity: 2026-02-07 — Completed v1.2-02-03-PLAN.md (TransformStream, Pipe Operations, Utilities)
+Phase: v1.2-03 of 5 (Response Body Integration)
+Plan: 1 of 1 complete
+Status: Phase complete - ready for v1.2-04
+Last activity: 2026-02-07 — Completed v1.2-03-01-PLAN.md (Response.body getter, ReadableStream reading fix)
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
-Progress: [######░░░░] 60% (v1.2)
+Progress: [########░░] 80% (v1.2)
 
 ## Shipped Milestones
 
@@ -32,8 +32,8 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
-- v1.2: 3 plans (Streams Foundation complete)
-- Total: 23 plans, 10 phases
+- v1.2: 4 plans (Response Body Integration complete)
+- Total: 24 plans, 11 phases
 
 ## Accumulated Context
 
@@ -63,6 +63,12 @@ Key architectural decisions:
 - V8 Function.call() pattern simpler than replicating full async state machines in Zig
 - Simplified tee() implementation without perfect reader sharing (MVP focus)
 
+**Recent (v1.2-03-01):**
+- Response.body must use setAccessorGetter (property) not set (method) for WinterCG spec compliance
+- pull()-based ReadableStream avoids start()+close() synchronous hang bug
+- After calling pull() in readerRead, must re-check queue (V8 runs JS synchronously)
+- Guard V8 pending exceptions: check pull_fn.call() result before further V8 API calls
+
 ### Pending Todos
 
 None.
@@ -74,20 +80,19 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-07
-Stopped at: Completed v1.2-02-03 TransformStream, Pipe Operations, Utilities
+Stopped at: Completed v1.2-03-01 Response Body Integration
 Resume file: None
 
 ## Next Steps
 
-Phase v1.2-02 complete (3/3 plans). Continue to v1.2-03:
-- v1.2-03: HTTP Response Body Integration
+Phase v1.2-03 complete (1/1 plans). Continue to v1.2-04:
+- v1.2-04: Graceful Shutdown
 
-**Phase v1.2-02 Deliverables Complete:**
-- ReadableStream, WritableStream, TransformStream APIs
-- pipeTo(), pipeThrough(), tee(), from() operations
-- TextEncoderStream, TextDecoderStream
-- Async iteration support
-- Per-app buffer limits and backpressure
+**Phase v1.2-03 Deliverables Complete:**
+- Response.body returns ReadableStream for string and stream bodies
+- Response constructor accepts ReadableStream body argument
+- response.text() and response.json() read from stream bodies
+- Pull-based ReadableStream reading works via reader.read()
 
 ---
-*Last updated: 2026-02-07 after v1.2-02-03 execution*
+*Last updated: 2026-02-07 after v1.2-03-01 execution*

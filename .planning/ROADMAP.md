@@ -33,7 +33,7 @@ Phases v1.0-01 through v1.0-05 delivered core JavaScript runtime with V8 isolate
 
 - [x] **Phase v1.2-01: Per-App Environment Variables** - Isolated config per app
 - [x] **Phase v1.2-02: Streams Foundation** - ReadableStream/WritableStream core
-- [ ] **Phase v1.2-03: Response Body Integration** - Streaming HTTP responses
+- [x] **Phase v1.2-03: Response Body Integration** - Streaming HTTP responses
 - [ ] **Phase v1.2-04: Graceful Shutdown** - Connection draining on app removal and process shutdown
 - [ ] **Phase v1.2-05: Documentation Site** - Astro + Starlight with WinterCG reference
 
@@ -96,7 +96,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] v1.2-03-01-PLAN.md — Extend Response with .body getter, ReadableStream constructor support, streaming text()/json()
+- [x] v1.2-03-01-PLAN.md — Extend Response with .body getter, ReadableStream constructor support, streaming text()/json()
 
 ### Phase v1.2-04: Graceful Shutdown
 
@@ -146,9 +146,9 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | v1.2-01. Per-App Env Vars | v1.2 | 1/1 | ✓ Complete | 2026-02-02 |
 | v1.2-02. Streams Foundation | v1.2 | 3/3 | ✓ Complete | 2026-02-07 |
-| v1.2-03. Response Body | v1.2 | 0/1 | Ready for execution | - |
+| v1.2-03. Response Body | v1.2 | 1/1 | ✓ Complete | 2026-02-07 |
 | v1.2-04. Graceful Shutdown | v1.2 | 0/0 | Not started | - |
 | v1.2-05. Documentation | v1.2 | 0/0 | Not started | - |
 
 ---
-*Last updated: 2026-02-07 after v1.2-03 planning*
+*Last updated: 2026-02-07 after v1.2-03 execution*
