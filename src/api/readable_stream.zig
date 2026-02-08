@@ -944,7 +944,8 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         return;
     }
 
-    // Queue is empty and stream not closed - call pull callback and wait
+    // Queue is empty and stream not closed - call pull callback
+    // pull() runs synchronously in V8, so data may be enqueued immediately
     const pull_cb = js.getProp(stream, ctx.context, ctx.isolate, "_pullCallback") catch null;
     if (pull_cb) |cb| {
         if (cb.isFunction()) {
@@ -955,12 +956,100 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 
             const pull_fn = js.asFunction(cb);
             var pull_args: [1]v8.Value = .{controller_val};
-            _ = pull_fn.call(ctx.context, stream.toValue(), &pull_args);
+            const pull_result = pull_fn.call(ctx.context, stream.toValue(), &pull_args);
+
+            // If pull() threw a JS exception, V8 has a pending exception.
+            // Do NOT call further V8 APIs - just return and let V8 propagate the error.
+            if (pull_result == null) {
+                return;
+            }
+
+            // After pull(), re-check the queue - pull() may have synchronously enqueued data
+            const post_queue_val = js.getProp(stream, ctx.context, ctx.isolate, "_queue") catch {
+                js.throw(ctx.isolate, "Internal error: cannot read queue after pull");
+                return;
+            };
+            const post_queue = js.asArray(post_queue_val);
+            const post_queue_len = post_queue.length();
+
+            if (post_queue_len > 0) {
+                // Data was enqueued by pull() - dequeue and return it
+                const chunk = js.getIndex(post_queue.castTo(v8.Object), ctx.context, 0) catch {
+                    js.throw(ctx.isolate, "Internal error: cannot dequeue after pull");
+                    return;
+                };
+
+                // Update queue byte size
+                const chunk_size = calculateChunkSize(ctx, chunk);
+                const cur_size_val = js.getProp(stream, ctx.context, ctx.isolate, "_queueByteSize") catch {
+                    js.throw(ctx.isolate, "Internal error: cannot read queue size");
+                    return;
+                };
+                const cur_size = if (cur_size_val.isNumber()) cur_size_val.toF64(ctx.context) catch 0.0 else 0.0;
+                _ = js.setProp(stream, ctx.context, ctx.isolate, "_queueByteSize", js.number(ctx.isolate, cur_size - @as(f64, @floatFromInt(chunk_size))));
+
+                // Shift queue (remove first element)
+                const new_queue = js.array(ctx.isolate, post_queue_len - 1);
+                var i: u32 = 1;
+                while (i < post_queue_len) : (i += 1) {
+                    const elem = js.getIndex(post_queue.castTo(v8.Object), ctx.context, i) catch continue;
+                    _ = js.setIndex(new_queue.castTo(v8.Object), ctx.context, i - 1, elem);
+                }
+                _ = js.setProp(stream, ctx.context, ctx.isolate, "_queue", new_queue);
+
+                // Check if stream should close after this dequeue
+                const cr_val = js.getProp(stream, ctx.context, ctx.isolate, "_closeRequested") catch {
+                    // Return chunk even if we can't check close status
+                    const result = js.object(ctx.isolate, ctx.context);
+                    _ = js.setProp(result, ctx.context, ctx.isolate, "value", chunk);
+                    _ = js.setProp(result, ctx.context, ctx.isolate, "done", v8.Value{ .handle = js.boolean(ctx.isolate, false).handle });
+                    const resolver = v8.PromiseResolver.init(ctx.context);
+                    _ = resolver.resolve(ctx.context, result.toValue());
+                    js.ret(ctx, resolver.getPromise());
+                    return;
+                };
+                const close_req = if (cr_val.isBoolean()) cr_val.toBool(ctx.isolate) else false;
+
+                if (close_req and new_queue.length() == 0) {
+                    _ = js.setProp(stream, ctx.context, ctx.isolate, "_state", js.string(ctx.isolate, "closed"));
+                }
+
+                // Return {value: chunk, done: false}
+                const result = js.object(ctx.isolate, ctx.context);
+                _ = js.setProp(result, ctx.context, ctx.isolate, "value", chunk);
+                _ = js.setProp(result, ctx.context, ctx.isolate, "done", v8.Value{ .handle = js.boolean(ctx.isolate, false).handle });
+                const resolver = v8.PromiseResolver.init(ctx.context);
+                _ = resolver.resolve(ctx.context, result.toValue());
+                js.ret(ctx, resolver.getPromise());
+                return;
+            }
+
+            // Queue still empty after pull() - re-check state (pull may have closed the stream)
+            const post_state_val = js.getProp(stream, ctx.context, ctx.isolate, "_state") catch {
+                js.throw(ctx.isolate, "Internal error: cannot read state after pull");
+                return;
+            };
+            const post_state_str = post_state_val.toString(ctx.context) catch {
+                js.throw(ctx.isolate, "Internal error: invalid state after pull");
+                return;
+            };
+            var post_state_buf: [32]u8 = undefined;
+            const post_state_len = post_state_str.writeUtf8(ctx.isolate, &post_state_buf);
+            const post_state = post_state_buf[0..post_state_len];
+
+            if (std.mem.eql(u8, post_state, "closed")) {
+                const result = js.object(ctx.isolate, ctx.context);
+                _ = js.setProp(result, ctx.context, ctx.isolate, "value", js.undefined_(ctx.isolate).toValue());
+                _ = js.setProp(result, ctx.context, ctx.isolate, "done", v8.Value{ .handle = js.boolean(ctx.isolate, true).handle });
+                const resolver = v8.PromiseResolver.init(ctx.context);
+                _ = resolver.resolve(ctx.context, result.toValue());
+                js.ret(ctx, resolver.getPromise());
+                return;
+            }
         }
     }
 
-    // For MVP: return rejected promise when no data available
-    // TODO: Implement proper async pending reads mechanism
+    // No pull callback or pull didn't enqueue data - reject
     const resolver = v8.PromiseResolver.init(ctx.context);
     const error_msg = js.string(ctx.isolate, "No data available - pull callback should enqueue data");
     _ = resolver.reject(ctx.context, error_msg.toValue());

@@ -115,8 +115,12 @@ pub fn registerFetchAPI(isolate: v8.Isolate, context: v8.Context) void {
     const headers_fn = v8.FunctionTemplate.initCallback(isolate, responseHeaders);
     response_proto.set(v8.String.initUtf8(isolate, "headers").toName(), headers_fn, v8.PropertyAttribute.None);
 
-    const body_fn = v8.FunctionTemplate.initCallback(isolate, responseBody);
-    response_proto.set(v8.String.initUtf8(isolate, "body").toName(), body_fn, v8.PropertyAttribute.None);
+    // body is a getter property (not a method) per WinterCG spec
+    const body_getter = v8.FunctionTemplate.initCallback(isolate, responseBody);
+    response_proto.setAccessorGetter(
+        v8.String.initUtf8(isolate, "body").toName(),
+        body_getter,
+    );
 
     const text_fn = v8.FunctionTemplate.initCallback(isolate, responseText);
     response_proto.set(v8.String.initUtf8(isolate, "text").toName(), text_fn, v8.PropertyAttribute.None);

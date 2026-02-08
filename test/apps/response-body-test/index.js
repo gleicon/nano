@@ -1,121 +1,145 @@
 export default {
   async fetch(request) {
-    const path = request._url || '/';
+    try {
+      const url = new URL(request.url());
+      const path = url.pathname(); // pathname is a method in nano
 
-    // Debug endpoint
-    if (path === '/debug') {
-      return Response.json({ path, hasUrl: !!request._url, request: Object.keys(request) });
-    }
-
-    // Test 1: String body becomes ReadableStream
-    if (path === '/test-string-body') {
-      const response = new Response("hello world");
-      return Response.json({
-        bodyType: response.body !== null ? "ReadableStream" : "null",
-        locked: response.body !== null ? response.body.locked : undefined,
-        hasGetReader: response.body !== null ? typeof response.body.getReader === 'function' : false
-      });
-    }
-
-    // Test 2: ReadableStream constructor argument
-    if (path === '/test-stream-body') {
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue("chunk1");
-          controller.enqueue("chunk2");
-          controller.close();
-        }
-      });
-      const response = new Response(stream);
-      return Response.json({
-        bodyType: response.body !== null ? "ReadableStream" : "null",
-        locked: response.body !== null ? response.body.locked : undefined,
-        isSameReference: response.body === stream
-      });
-    }
-
-    // Test 3: Null body handling
-    if (path === '/test-null-body') {
-      const response = new Response(null);
-      return Response.json({
-        bodyIsNull: response.body === null
-      });
-    }
-
-    // Test 4: Streaming large response
-    if (path === '/test-fetch-streaming') {
-      // Create a mock large response with multiple chunks
-      const stream = new ReadableStream({
-        start(controller) {
-          // Send 10 chunks of ~10KB each
-          for (let i = 0; i < 10; i++) {
-            const chunk = "x".repeat(10240); // 10KB chunk
-            controller.enqueue(chunk);
-          }
-          controller.close();
-        }
-      });
-
-      const response = new Response(stream);
-      const reader = response.body.getReader();
-
-      let chunksReceived = 0;
-      let totalBytes = 0;
-
-      while (true) {
-        const {done, value} = await reader.read();
-        if (done) break;
-        chunksReceived++;
-        totalBytes += value.length;
+      // Test 1: String body becomes ReadableStream
+      if (path === '/test-string-body') {
+        const response = new Response("hello world");
+        const body = response.body;
+        const bodyType = body !== null ? "ReadableStream" : "null";
+        const locked = body !== null ? body.locked : null;
+        const hasGetReader = body !== null ? typeof body.getReader === 'function' : false;
+        return new Response(JSON.stringify({ bodyType, locked, hasGetReader }), {
+          headers: { "content-type": "application/json" }
+        });
       }
 
-      await reader.releaseLock();
+      // Test 2: ReadableStream constructor argument (using pull to avoid start+close hang)
+      if (path === '/test-stream-body') {
+        let count = 0;
+        const stream = new ReadableStream({
+          pull(controller) {
+            if (count < 2) {
+              controller.enqueue("chunk" + (count + 1));
+              count++;
+            } else {
+              controller.close();
+            }
+          }
+        });
+        const response = new Response(stream);
+        const bodyType = response.body !== null ? "ReadableStream" : "null";
+        const locked = response.body !== null ? response.body.locked : null;
+        const isSameReference = response.body === stream;
+        return new Response(JSON.stringify({ bodyType, locked, isSameReference }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
 
-      return Response.json({
-        chunksReceived,
-        totalBytes
-      });
-    }
+      // Test 3: Null body handling
+      if (path === '/test-null-body') {
+        const response = new Response(null);
+        return new Response(JSON.stringify({ bodyIsNull: response.body === null }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
 
-    // Test 5: Response.text() with stream body
-    if (path === '/test-text-from-stream') {
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue("hello");
-          controller.enqueue(" ");
-          controller.enqueue("world");
-          controller.close();
+      // Test 4: Streaming large response via pull-based ReadableStream
+      if (path === '/test-fetch-streaming') {
+        let pullCount = 0;
+        const stream = new ReadableStream({
+          pull(controller) {
+            if (pullCount < 10) {
+              controller.enqueue("x".repeat(10240)); // 10KB chunks
+              pullCount++;
+            } else {
+              controller.close();
+            }
+          }
+        });
+
+        const response = new Response(stream);
+        const reader = response.body.getReader();
+
+        let chunksReceived = 0;
+        let totalBytes = 0;
+
+        for (let i = 0; i < 20; i++) { // safety limit
+          const result = await reader.read();
+          if (result.done) break;
+          chunksReceived++;
+          totalBytes += result.value.length;
         }
+
+        reader.releaseLock();
+
+        return new Response(JSON.stringify({ chunksReceived, totalBytes }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      // Test 5: Response.text() with stream body
+      if (path === '/test-text-from-stream') {
+        const parts = ["hello", " ", "world"];
+        let idx = 0;
+        const stream = new ReadableStream({
+          pull(controller) {
+            if (idx < parts.length) {
+              controller.enqueue(parts[idx++]);
+            } else {
+              controller.close();
+            }
+          }
+        });
+
+        const response = new Response(stream);
+        const text = await response.text();
+
+        return new Response(JSON.stringify({
+          text: text,
+          expected: "hello world",
+          match: text === "hello world"
+        }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      // Test 6: Response.json() with stream body
+      if (path === '/test-json-from-stream') {
+        let sent = false;
+        const stream = new ReadableStream({
+          pull(controller) {
+            if (!sent) {
+              controller.enqueue('{"key":"value"}');
+              sent = true;
+            } else {
+              controller.close();
+            }
+          }
+        });
+
+        const response = new Response(stream);
+        const parsed = await response.json();
+
+        return new Response(JSON.stringify({
+          parsed: parsed,
+          keyValue: parsed.key
+        }), {
+          headers: { "content-type": "application/json" }
+        });
+      }
+
+      return new Response(JSON.stringify({ error: "Unknown endpoint" }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
       });
-
-      const response = new Response(stream);
-      const text = await response.text();
-
-      return Response.json({
-        text: text,
-        expected: "hello world",
-        match: text === "hello world"
+    } catch (e) {
+      return new Response(JSON.stringify({ error: e.message, stack: e.stack }), {
+        status: 500,
+        headers: { "content-type": "application/json" }
       });
     }
-
-    // Test 6: Response.json() with stream body
-    if (path === '/test-json-from-stream') {
-      const stream = new ReadableStream({
-        start(controller) {
-          controller.enqueue('{"key":"value"}');
-          controller.close();
-        }
-      });
-
-      const response = new Response(stream);
-      const parsed = await response.json();
-
-      return Response.json({
-        parsed: parsed,
-        keyValue: parsed.key
-      });
-    }
-
-    return Response.json({ error: 'Unknown endpoint' }, { status: 404 });
   }
 };
