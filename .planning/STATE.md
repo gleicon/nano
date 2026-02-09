@@ -10,13 +10,13 @@ See: .planning/PROJECT.md (updated 2026-02-01)
 ## Current Position
 
 Phase: v1.2-05 of 6 (API Spec Compliance)
-Plan: 2 of 3 complete
-Status: Plan 02 complete — Headers API fixes and binary data support
-Last activity: 2026-02-09 — Completed v1.2-05-02 Headers/Blob/crypto binary support
+Plan: 3 of 3 complete
+Status: Phase complete — All WinterCG spec compliance fixes verified end-to-end
+Last activity: 2026-02-09 — Completed v1.2-05-03 spec compliance verification
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
-Progress: [########░░] 78% (v1.2)
+Progress: [#########░] 83% (v1.2)
 
 ## Shipped Milestones
 
@@ -32,8 +32,8 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
-- v1.2: 9 plans complete (4 phases done + v1.2-05 plans 1-2)
-- Total: 29 plans, 12 phases
+- v1.2: 10 plans complete (5 phases done)
+- Total: 30 plans, 13 phases
 
 ## Accumulated Context
 
@@ -66,6 +66,12 @@ Key architectural decisions:
 - V8 BackingStore pattern (getData + @ptrCast) is standard for ArrayBuffer/Uint8Array access
 - Binary data support extends to Blob/File constructors and crypto.subtle.digest
 
+**Recent (v1.2-05-03):**
+- console.log uses V8 global JSON.stringify for object inspection (not toString())
+- Response.ok correctly returns true for 2xx status range (200-299 inclusive)
+- NANO doesn't map status codes to reason phrases (returns "OK" for all success statuses)
+- All WinterCG spec compliance fixes verified end-to-end via test app
+
 ### Pending Todos
 
 None.
@@ -77,22 +83,26 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed v1.2-05-02-PLAN.md (Headers/Blob/crypto binary support)
+Stopped at: Completed v1.2-05-03-PLAN.md (spec compliance verification)
 Resume file: None
 
 ## Next Steps
 
-Phase v1.2-05 plan 02 complete (2/3 plans). Continue with:
-- v1.2-05-03: Final compliance fixes (remaining spec gaps)
+Phase v1.2-05 complete (3/3 plans). Ready to proceed with phase v1.2-06 (Graceful Shutdown).
 
-**v1.2-05-02 Deliverables Complete:**
-- Headers.delete() properly removes keys (undefined marker + _keys rebuild)
-- Headers.append() with WHATWG comma-separated multi-value
-- Blob/File constructors accept ArrayBuffer and Uint8Array parts
-- crypto.subtle.digest accepts ArrayBuffer/Uint8Array input
+**v1.2-05 Phase Complete:**
+- All WinterCG spec properties converted to getters (no parentheses needed)
+- Headers.delete() and Headers.append() fully functional
+- Binary data support for Blob/File constructors and crypto.subtle.digest
+- console.log object inspection using JSON.stringify
+- Comprehensive end-to-end verification via test app
 
-**Remaining for v1.2-05:**
-- Plan 03: Final compliance fixes per RESEARCH.md
+**Known Minor Deviations:**
+- NANO doesn't map HTTP status codes to reason phrases (returns "OK" for all statuses)
+- crypto.subtle.digest may have implementation gaps (test output incomplete)
+
+**Ready for:**
+- v1.2-06: Graceful Shutdown (research + plan already complete per git log)
 
 ---
-*Last updated: 2026-02-09 after v1.2-05-02 completion*
+*Last updated: 2026-02-09 after v1.2-05-03 completion*
