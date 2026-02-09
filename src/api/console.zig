@@ -63,6 +63,36 @@ fn writeValue(file: std.fs.File, isolate: v8.Isolate, context: v8.Context, value
         file.writeAll("undefined") catch {};
     } else if (value.isNull()) {
         file.writeAll("null") catch {};
+    } else if (value.isObject()) {
+        // Use JSON.stringify for proper object inspection
+        const global = context.getGlobal();
+        const json_val = js.getProp(global, context, isolate, "JSON") catch {
+            file.writeAll("[object]") catch {};
+            return;
+        };
+        const json_obj = js.asObject(json_val);
+        const stringify_fn_val = js.getProp(json_obj, context, isolate, "stringify") catch {
+            file.writeAll("[object]") catch {};
+            return;
+        };
+        const stringify_fn = js.asFunction(stringify_fn_val);
+        var args: [1]v8.Value = .{value};
+        const result = stringify_fn.call(context, json_val, &args) orelse {
+            // Fall back if stringify fails (circular references, etc.)
+            const str = value.toString(context) catch {
+                file.writeAll("[object]") catch {};
+                return;
+            };
+            var buf: [4096]u8 = undefined;
+            file.writeAll(js.readString(isolate, str, &buf)) catch {};
+            return;
+        };
+        const result_str = result.toString(context) catch {
+            file.writeAll("[object]") catch {};
+            return;
+        };
+        var buf: [4096]u8 = undefined;
+        file.writeAll(js.readString(isolate, result_str, &buf)) catch {};
     } else {
         const str = value.toString(context) catch {
             file.writeAll("[object]") catch {};
