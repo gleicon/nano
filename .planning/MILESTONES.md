@@ -1,5 +1,33 @@
 # Project Milestones: NANO
 
+## v1.2 Production Polish (Shipped: 2026-02-09)
+
+**Delivered:** WinterCG Streams API, per-app environment variables, graceful shutdown with connection draining, API spec compliance (24 getter properties), and 34-page documentation site.
+
+**Phases completed:** v1.2-01 through v1.2-06 (13 plans total)
+
+**Key accomplishments:**
+
+- WinterCG Streams — ReadableStream, WritableStream, TransformStream with pipe operations and text streams
+- Per-App Environment Variables — Isolated `env` parameter in fetch handler with hot-reload support
+- Graceful Shutdown — Connection draining, SIGTERM/SIGINT handlers, V8 timer lifecycle fixes
+- API Spec Compliance — 24 properties migrated to getters, Headers.delete/append, binary data support
+- Response.body Streaming — ReadableStream body support for HTTP responses
+- Documentation Site — 34-page Astro + Starlight site with API reference, WinterCG compliance, deployment guides
+
+**Stats:**
+
+- 101 files changed
+- +27,745 lines (10,988 LOC Zig total)
+- 6 phases, 13 plans
+- 8 days (2026-02-02 → 2026-02-09)
+
+**Git range:** `4038380` → `6e8b135`
+
+**What's next:** v1.3 with buffer limits, async fetch, crypto expansion, WinterCG essentials
+
+---
+
 ## v1.1 Multi-App Hosting (Shipped: 2026-02-01)
 
 **Delivered:** Multi-app runtime with virtual host routing, config-based loading, hot reload, and Admin REST API.

@@ -8,21 +8,12 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 **Skip the container fleet entirely.** One NANO process replaces dozens of Node containers, their image builds, fleet management, and routing infrastructure — while maintaining isolation between apps.
 
-## Current Milestone: v1.2 Production Polish
+## Current State (v1.2 Shipped)
 
-**Goal:** Add WinterCG Streams API, per-app environment variables, graceful shutdown with connection draining, and documentation website.
-
-**Target features:**
-- Streams API (WinterCG-aligned ReadableStream/WritableStream)
-- Per-app environment variables (config JSON, complete isolation)
-- Graceful shutdown (connection draining on app removal AND process shutdown)
-- Documentation website (Astro + Starlight with WinterCG standards reference)
-
-## Current State (v1.1 Shipped)
-
-**Version:** v1.1 Multi-App Hosting (shipped 2026-02-01)
-**Codebase:** ~13,000 lines of Zig across 90+ files
-**Status:** Production-ready for multi-app hosting
+**Version:** v1.2 Production Polish (shipped 2026-02-09)
+**Codebase:** ~11,000 lines of Zig across 100+ files
+**Documentation:** 34-page Astro + Starlight site
+**Status:** Production-ready with streaming, graceful shutdown, and full documentation
 
 ### What's Working
 
@@ -41,13 +32,26 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 - Admin REST API: GET/POST/DELETE /admin/apps, POST /admin/reload
 - Atomic app add/remove without request drops
 
+**Production Polish (v1.2):**
+- WinterCG Streams: ReadableStream, WritableStream, TransformStream with pipe operations
+- Per-app environment variables with isolation and hot-reload
+- Graceful shutdown with connection draining (SIGTERM/SIGINT + app removal)
+- API spec compliance: 24 getter properties, Headers.delete/append, binary data support
+- Response.body streaming via ReadableStream
+- 34-page documentation site (Getting Started, API reference, deployment guides)
+
 ### Known Limitations
 
-- No V8 snapshots (compile-time caching only)
-- No isolate pooling (single-threaded)
-- REPL doesn't support timers
-- Response headers limited to content-type
-- Changed apps (same hostname, different path) not auto-detected
+- Stack buffer limits: Blob 64KB, fetch 64KB, atob 8KB, console 4KB (B-01)
+- Synchronous fetch() blocks event loop (B-02)
+- WritableStream sync-only sinks (B-03)
+- crypto.subtle limited to HMAC + hashing (B-04)
+- ReadableStream.tee() data loss (B-05)
+- Missing WinterCG APIs: structuredClone, queueMicrotask, performance.now (B-06)
+- Single-threaded server (B-07)
+- URL read-only properties (B-08)
+
+See BACKLOG.md for full details and suggested approaches.
 
 ## Requirements
 
@@ -65,12 +69,13 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 - Virtual host routing (multiple apps on same port) — v1.1
 - Hot reload apps without restart — v1.1
 
-### Active (v1.2)
+### Validated (v1.2)
 
-- [ ] Streams API (WinterCG-aligned ReadableStream/WritableStream)
-- [ ] Per-app environment variables (config JSON, isolated per app)
-- [ ] Graceful shutdown with connection draining (app removal + process shutdown)
-- [ ] Documentation website (Astro + Starlight)
+- Streams API (ReadableStream/WritableStream/TransformStream) — v1.2
+- Per-app environment variables (config JSON, isolated per app) — v1.2
+- Graceful shutdown with connection draining — v1.2
+- API spec compliance (getter properties, Headers fixes, binary data) — v1.2
+- Documentation website (Astro + Starlight, 34 pages) — v1.2
 
 ### Future (v2 candidates)
 
@@ -83,7 +88,6 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 - KV storage API — v2+ (use external storage initially)
 - Built-in HTTPS termination — use external reverse proxy
 - Node.js API compatibility — Workers API only
-- WebSocket support — v2+
 - Durable Objects — out of scope entirely (too complex, different model)
 
 ## Context
@@ -114,18 +118,21 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 ## Key Decisions
 
-| Decision | Rationale | Outcome |
-|----------|-----------|---------|
-| Zig over Rust | Better C++ interop, arena allocators, learning goal | Good — clean V8 integration |
-| V8 over JSC | Better documented embedding, snapshot system | Good — stable runtime |
-| Workers API over Node API | Simpler surface, isolation-friendly, portable | Good — clean API |
-| Ports-first routing | Simple start, external proxy handles SSL/vhosts | Good — works for MVP |
-| Script caching over snapshots | Snapshots too complex (callback serialization) | Good — fast enough for v1 |
-| Single-threaded MVP | Isolate pooling adds complexity | Good — simpler debugging |
-| libxev for event loop | Cross-platform, async I/O | Good — timer + fetch work |
-| Poll-based config watching | libxev lacks filesystem events | Good — simple and portable |
-| Function pointer callbacks | Avoids circular imports | Good — clean module separation |
-| Admin /admin/* prefix | Clear separation, easy to gate | Good — extensible |
+| Decision                       | Rationale                                         | Outcome                           |
+| ------------------------------ | ------------------------------------------------- | --------------------------------- |
+| Zig over Rust                  | Better C++ interop, arena allocators              | Good — clean V8 integration       |
+| V8 over JSC                    | Better documented embedding, snapshot system      | Good — stable runtime             |
+| Workers API over Node API      | Simpler surface, isolation-friendly, portable     | Good — clean API                  |
+| Ports-first routing            | Simple start, external proxy handles SSL          | Good — works for MVP              |
+| Script caching over snapshots  | Snapshots too complex (callback serialization)    | Good — fast enough for v1         |
+| Single-threaded MVP            | Isolate pooling adds complexity                   | Good — simpler debugging          |
+| libxev for event loop          | Cross-platform, async I/O                         | Good — timer + fetch work         |
+| Poll-based config watching     | libxev lacks filesystem events                    | Good — simple and portable        |
+| Function pointer callbacks     | Avoids circular imports                           | Good — clean module separation    |
+| Admin /admin/* prefix          | Clear separation, easy to gate                    | Good — extensible                 |
+| Embedded JS for streams        | V8 Function.call() simpler than Zig state machine | Good — TransformStream/pipeTo/tee |
+| setAccessorGetter for props    | Standard WinterCG pattern for spec properties     | Good — 24 properties converted    |
+| Astro + Starlight for docs     | Built-in search, MDX support, fast                | Good — 34 pages, low maintenance  |
 
 ---
 
@@ -145,5 +152,23 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 </details>
 
+<details>
+<summary>v1.1 → v1.2 Migration Notes</summary>
+
+**Breaking changes:** None. v1.2 is backwards compatible.
+
+**New features:**
+- Streams API: ReadableStream, WritableStream, TransformStream
+- Per-app `env` object in config.json, accessible as second fetch handler parameter
+- Graceful shutdown on SIGTERM/SIGINT with connection draining
+- Properties now use getter accessors (backwards compatible — methods still work)
+
+**Upgrade path:**
+1. (Optional) Add `env` to app configs for environment variables
+2. (Optional) Use `request.url` instead of `request.url()` (both work)
+3. (Optional) Use Response.body for streaming
+
+</details>
+
 ---
-*Last updated: 2026-02-01 after starting v1.2 milestone*
+*Last updated: 2026-02-09 after v1.2 milestone completion*
