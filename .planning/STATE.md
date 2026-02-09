@@ -5,7 +5,7 @@
 See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
-**Current focus:** Phase v1.2-05 API Spec Compliance — Plan 02 complete (Headers/Blob/crypto binary support)
+**Current focus:** Phase v1.2-05 API Spec Compliance COMPLETE — ready for verification
 
 ## Current Position
 
@@ -69,7 +69,8 @@ Key architectural decisions:
 **Recent (v1.2-05-03):**
 - console.log uses V8 global JSON.stringify for object inspection (not toString())
 - Response.ok correctly returns true for 2xx status range (200-299 inclusive)
-- NANO doesn't map status codes to reason phrases (returns "OK" for all success statuses)
+- Response statusText now maps status codes to standard reason phrases via std.http.Status.phrase()
+- crypto.subtle.digest with binary Uint8Array input verified working (await works in fetch handlers)
 - All WinterCG spec compliance fixes verified end-to-end via test app
 
 ### Pending Todos
@@ -97,12 +98,8 @@ Phase v1.2-05 complete (3/3 plans). Ready to proceed with phase v1.2-06 (Gracefu
 - console.log object inspection using JSON.stringify
 - Comprehensive end-to-end verification via test app
 
-**Known Minor Deviations:**
-- NANO doesn't map HTTP status codes to reason phrases (returns "OK" for all statuses)
-- crypto.subtle.digest may have implementation gaps (test output incomplete)
-
 **Ready for:**
-- v1.2-06: Graceful Shutdown (research + plan already complete per git log)
+- v1.2-06: Documentation Site
 
 ---
 *Last updated: 2026-02-09 after v1.2-05-03 completion*

@@ -35,7 +35,7 @@ Phases v1.0-01 through v1.0-05 delivered core JavaScript runtime with V8 isolate
 - [x] **Phase v1.2-02: Streams Foundation** - ReadableStream/WritableStream core
 - [x] **Phase v1.2-03: Response Body Integration** - Streaming HTTP responses
 - [x] **Phase v1.2-04: Graceful Shutdown & Stability** - Connection draining, V8 lifecycle fixes, timer system
-- [ ] **Phase v1.2-05: API Spec Compliance** - Fix properties-as-methods, buffer limits, missing methods
+- [x] **Phase v1.2-05: API Spec Compliance** - Fix properties-as-methods, buffer limits, missing methods
 - [ ] **Phase v1.2-06: Documentation Site** - Astro + Starlight with WinterCG reference
 
 ## Phase Details
@@ -162,9 +162,9 @@ Plans:
 **Plans:** 3 plans in 3 waves
 
 Plans:
-- [ ] v1.2-05-01 — Properties→getters migration (Blob, Request, Response, URL, AbortController)
-- [ ] v1.2-05-02 — Headers fixes (delete, append) + Blob binary parts + crypto digest BufferSource
-- [ ] v1.2-05-03 — Console object inspection + test verification
+- [x] v1.2-05-01 — Properties→getters migration (Blob, Request, Response, URL, AbortController)
+- [x] v1.2-05-02 — Headers fixes (delete, append) + Blob binary parts + crypto digest BufferSource
+- [x] v1.2-05-03 — Console object inspection + test verification
 
 ### Phase v1.2-06: Documentation Site
 
@@ -196,18 +196,19 @@ Plans:
 | v1.2-02. Streams Foundation | v1.2 | 3/3 | ✓ Complete | 2026-02-07 |
 | v1.2-03. Response Body | v1.2 | 1/1 | ✓ Complete | 2026-02-07 |
 | v1.2-04. Graceful Shutdown | v1.2 | 2/2 | ✓ Complete | 2026-02-08 |
-| v1.2-05. API Spec Compliance | v1.2 | 0/3 | Not started | - |
+| v1.2-05. API Spec Compliance | v1.2 | 3/3 | ✓ Complete | 2026-02-08 |
 | v1.2-06. Documentation | v1.2 | 0/0 | Not started | - |
 
 ## Pre-existing Issues Registry
 
-### Tracked (in scope for v1.2-05)
-- Properties as methods: Blob, Request, Response, URL, AbortController, File
-- Headers.delete() → undefined instead of remove
-- Missing Headers.append()
-- Blob constructor string-only
-- crypto.subtle.digest string-only
-- console.log [object Object]
+### Resolved in v1.2-05
+- ~~Properties as methods~~ → converted to getter accessors (24 properties)
+- ~~Headers.delete() → undefined~~ → now properly removes keys
+- ~~Missing Headers.append()~~ → implemented with multi-value support
+- ~~Blob constructor string-only~~ → accepts ArrayBuffer/Uint8Array
+- ~~crypto.subtle.digest string-only~~ → accepts ArrayBuffer/Uint8Array
+- ~~console.log [object Object]~~ → uses JSON.stringify
+- ~~Response.statusText hardcoded "OK"~~ → maps via std.http.Status.phrase()
 
 ### Known Limitations (deferred → BACKLOG.md)
 
@@ -227,4 +228,4 @@ Plans:
 - **v1.4+ (TBD):** Connection pooling / multi-threading (B-07), WebSocket, Cache API
 
 ---
-*Last updated: 2026-02-08 after v1.2-04 completion and v1.2-05 creation*
+*Last updated: 2026-02-08 after v1.2-05 completion*
