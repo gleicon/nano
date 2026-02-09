@@ -5,18 +5,18 @@
 See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
-**Current focus:** Phase v1.2-05 API Spec Compliance COMPLETE — ready for verification
+**Current focus:** Phase v1.2-06 Documentation Site — plan 01 of 2 complete
 
 ## Current Position
 
-Phase: v1.2-05 of 6 (API Spec Compliance)
-Plan: 3 of 3 complete
-Status: Phase complete — All WinterCG spec compliance fixes verified end-to-end
-Last activity: 2026-02-09 — Completed v1.2-05-03 spec compliance verification
+Phase: v1.2-06 of 6 (Documentation Site)
+Plan: 1 of 2 complete
+Status: In progress — Documentation foundation complete, API reference and deployment docs next
+Last activity: 2026-02-09 — Completed v1.2-06-01 documentation foundation
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
-Progress: [#########░] 83% (v1.2)
+Progress: [#########░] 92% (v1.2)
 
 ## Shipped Milestones
 
@@ -32,8 +32,8 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
-- v1.2: 10 plans complete (5 phases done)
-- Total: 30 plans, 13 phases
+- v1.2: 11 plans complete (5.5 phases done)
+- Total: 31 plans, 13.5 phases
 
 ## Accumulated Context
 
@@ -73,6 +73,12 @@ Key architectural decisions:
 - crypto.subtle.digest with binary Uint8Array input verified working (await works in fetch handlers)
 - All WinterCG spec compliance fixes verified end-to-end via test app
 
+**Recent (v1.2-06-01):**
+- Astro + Starlight chosen for documentation site (fast, built-in search, MDX support)
+- Auto-generate sidebars from filesystem structure for maintainability
+- Starlight v0.33+ requires social config as array format (not object)
+- Complete config.json reference documented with all fields and constraints
+
 ### Pending Todos
 
 None.
@@ -84,22 +90,23 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed v1.2-05-03-PLAN.md (spec compliance verification)
+Stopped at: Completed v1.2-06-01-PLAN.md (documentation foundation)
 Resume file: None
 
 ## Next Steps
 
-Phase v1.2-05 complete (3/3 plans). Ready to proceed with phase v1.2-06 (Graceful Shutdown).
+Phase v1.2-06 in progress (1/2 plans complete). Ready to proceed with plan 02 (API reference and deployment docs).
 
-**v1.2-05 Phase Complete:**
-- All WinterCG spec properties converted to getters (no parentheses needed)
-- Headers.delete() and Headers.append() fully functional
-- Binary data support for Blob/File constructors and crypto.subtle.digest
-- console.log object inspection using JSON.stringify
-- Comprehensive end-to-end verification via test app
+**v1.2-06-01 Plan Complete:**
+- Astro + Starlight documentation site scaffolded with NANO branding
+- Getting Started guides (installation, first app tutorial)
+- Complete config.json schema reference with all fields
+- Configuration examples for 6 common scenarios
+- CLI options documented (serve, run, REPL)
+- Site builds successfully, search working, 11 pages indexed
 
 **Ready for:**
-- v1.2-06: Documentation Site
+- v1.2-06-02: API Reference and Deployment Documentation
 
 ---
-*Last updated: 2026-02-09 after v1.2-05-03 completion*
+*Last updated: 2026-02-09 after v1.2-06-01 completion*
