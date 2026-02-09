@@ -1,0 +1,10 @@
+{
+  "port": 3000,
+  "apps": [
+    {
+      "name": "spec-compliance-test",
+      "hostname": "localhost",
+      "path": "./test/apps/spec-compliance-test"
+    }
+  ]
+}
