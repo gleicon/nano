@@ -8,7 +8,7 @@ v1.2 adds production-essential features: WinterCG Streams API for streaming resp
 
 - ✅ **v1.0 MVP** - Phases v1.0-01 to v1.0-05 (shipped 2026-01-25)
 - ✅ **v1.1 Multi-App Hosting** - Phases v1.1-01 to v1.1-02 (shipped 2026-02-01)
-- 🚧 **v1.2 Production Polish** - Phases v1.2-01 to v1.2-06 (in progress)
+- ✅ **v1.2 Production Polish** - Phases v1.2-01 to v1.2-06 (shipped 2026-02-09)
 
 ## Phases
 
@@ -27,7 +27,7 @@ Phases v1.0-01 through v1.0-05 delivered core JavaScript runtime with V8 isolate
 
 </details>
 
-### 🚧 v1.2 Production Polish (In Progress)
+### ✅ v1.2 Production Polish (Shipped 2026-02-09)
 
 **Milestone Goal:** Add Streams API, environment variables, graceful shutdown, API spec compliance, and documentation
 
@@ -36,7 +36,7 @@ Phases v1.0-01 through v1.0-05 delivered core JavaScript runtime with V8 isolate
 - [x] **Phase v1.2-03: Response Body Integration** - Streaming HTTP responses
 - [x] **Phase v1.2-04: Graceful Shutdown & Stability** - Connection draining, V8 lifecycle fixes, timer system
 - [x] **Phase v1.2-05: API Spec Compliance** - Fix properties-as-methods, buffer limits, missing methods
-- [ ] **Phase v1.2-06: Documentation Site** - Astro + Starlight with WinterCG reference
+- [x] **Phase v1.2-06: Documentation Site** - Astro + Starlight with WinterCG reference
 
 ## Phase Details
 
@@ -184,8 +184,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] v1.2-06-01-PLAN.md — Astro + Starlight scaffold, Getting Started, Config reference
-- [ ] v1.2-06-02-PLAN.md — API reference, WinterCG compliance, Deployment guides
+- [x] v1.2-06-01-PLAN.md — Astro + Starlight scaffold, Getting Started, Config reference
+- [x] v1.2-06-02-PLAN.md — API reference, WinterCG compliance, Deployment guides
 
 ## Progress
 
@@ -198,7 +198,7 @@ Plans:
 | v1.2-03. Response Body | v1.2 | 1/1 | ✓ Complete | 2026-02-07 |
 | v1.2-04. Graceful Shutdown | v1.2 | 2/2 | ✓ Complete | 2026-02-08 |
 | v1.2-05. API Spec Compliance | v1.2 | 3/3 | ✓ Complete | 2026-02-08 |
-| v1.2-06. Documentation | v1.2 | 0/2 | Not started | - |
+| v1.2-06. Documentation | v1.2 | 2/2 | ✓ Complete | 2026-02-09 |
 
 ## Pre-existing Issues Registry
 
@@ -229,4 +229,4 @@ Plans:
 - **v1.4+ (TBD):** Connection pooling / multi-threading (B-07), WebSocket, Cache API
 
 ---
-*Last updated: 2026-02-09 after v1.2-06 planning*
+*Last updated: 2026-02-09 after v1.2-06 completion — v1.2 milestone shipped*

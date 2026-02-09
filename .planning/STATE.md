@@ -10,13 +10,13 @@ See: .planning/PROJECT.md (updated 2026-02-01)
 ## Current Position
 
 Phase: v1.2-06 of 6 (Documentation Site)
-Plan: 1 of 2 complete
-Status: In progress — Documentation foundation complete, API reference and deployment docs next
-Last activity: 2026-02-09 — Completed v1.2-06-01 documentation foundation
+Plan: 2 of 2 complete
+Status: Complete — All documentation complete (34 pages)
+Last activity: 2026-02-09 — Completed v1.2-06-02 API reference and deployment documentation
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
-Progress: [#########░] 92% (v1.2)
+Progress: [##########] 100% (v1.2)
 
 ## Shipped Milestones
 
@@ -32,8 +32,8 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
-- v1.2: 11 plans complete (5.5 phases done)
-- Total: 31 plans, 13.5 phases
+- v1.2: 13 plans complete (6 phases done)
+- Total: 33 plans, 14 phases
 
 ## Accumulated Context
 
@@ -79,6 +79,13 @@ Key architectural decisions:
 - Starlight v0.33+ requires social config as array format (not object)
 - Complete config.json reference documented with all fields and constraints
 
+**Recent (v1.2-06-02):**
+- Document all B-01 through B-08 limitations in api/limitations.md with workarounds
+- Explain WinterCG property-as-method pattern in diffs-from-workers.md
+- Provide complete working configs for Nginx and Caddy (not partial snippets)
+- Document graceful shutdown with realistic deployment workflows
+- 34 total documentation pages created (11 from 06-01 + 23 from 06-02)
+
 ### Pending Todos
 
 None.
@@ -90,23 +97,22 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed v1.2-06-01-PLAN.md (documentation foundation)
+Stopped at: Completed v1.2-06-02-PLAN.md (API reference and deployment documentation)
 Resume file: None
 
 ## Next Steps
 
-Phase v1.2-06 in progress (1/2 plans complete). Ready to proceed with plan 02 (API reference and deployment docs).
+**Phase v1.2-06 COMPLETE** (2/2 plans done). All v1.2 phases complete.
 
-**v1.2-06-01 Plan Complete:**
-- Astro + Starlight documentation site scaffolded with NANO branding
-- Getting Started guides (installation, first app tutorial)
-- Complete config.json schema reference with all fields
-- Configuration examples for 6 common scenarios
-- CLI options documented (serve, run, REPL)
-- Site builds successfully, search working, 11 pages indexed
+**v1.2 Milestone Status:** READY TO SHIP
+- 6 phases complete (v1.2-01 through v1.2-06)
+- 13 plans executed
+- Documentation site complete with 34 pages
 
 **Ready for:**
-- v1.2-06-02: API Reference and Deployment Documentation
+- Optional: Deploy documentation site to static hosting (Vercel, Netlify, GitHub Pages)
+- Optional: Announce v1.2 release with documentation link
+- v1.3 planning (buffer limits, async fetch, crypto expansion, WinterCG essentials)
 
 ---
-*Last updated: 2026-02-09 after v1.2-06-01 completion*
+*Last updated: 2026-02-09 after v1.2-06-02 completion (v1.2 milestone complete)*
