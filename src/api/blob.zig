@@ -101,6 +101,12 @@ fn blobConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                 if (elem.isString()) {
                     const str = elem.toString(ctx.context) catch continue;
                     total_size += str.lenUtf8(ctx.isolate);
+                } else if (elem.isArrayBuffer()) {
+                    const ab = js.asArrayBuffer(elem);
+                    total_size += ab.getByteLength();
+                } else if (elem.isArrayBufferView()) {
+                    const view = js.asArrayBufferView(elem);
+                    total_size += view.getByteLength();
                 }
             }
         }
@@ -146,6 +152,34 @@ fn blobConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                     const str = elem.toString(ctx.context) catch continue;
                     const str_len = str.writeUtf8(ctx.isolate, data_buf[offset..]);
                     offset += str_len;
+                } else if (elem.isArrayBuffer()) {
+                    const ab = js.asArrayBuffer(elem);
+                    const ab_len = ab.getByteLength();
+                    const shared_ptr = ab.getBackingStore();
+                    const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+                    const ab_data = backing_store.getData();
+                    if (ab_data) |ptr| {
+                        const remaining = data_buf.len - offset;
+                        const copy_len = @min(ab_len, remaining);
+                        const byte_ptr: [*]const u8 = @ptrCast(ptr);
+                        @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[0..copy_len]);
+                        offset += copy_len;
+                    }
+                } else if (elem.isArrayBufferView()) {
+                    const view = js.asArrayBufferView(elem);
+                    const view_len = view.getByteLength();
+                    const view_offset = view.getByteOffset();
+                    const ab = view.getBuffer();
+                    const shared_ptr = ab.getBackingStore();
+                    const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+                    const ab_data = backing_store.getData();
+                    if (ab_data) |ptr| {
+                        const remaining = data_buf.len - offset;
+                        const copy_len = @min(view_len, remaining);
+                        const byte_ptr: [*]const u8 = @ptrCast(ptr);
+                        @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[view_offset .. view_offset + copy_len]);
+                        offset += copy_len;
+                    }
                 }
             }
 
@@ -412,6 +446,34 @@ fn fileConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                     const str = elem.toString(ctx.context) catch continue;
                     const str_len = str.writeUtf8(ctx.isolate, data_buf[offset..]);
                     offset += str_len;
+                } else if (elem.isArrayBuffer()) {
+                    const ab = js.asArrayBuffer(elem);
+                    const ab_len = ab.getByteLength();
+                    const shared_ptr = ab.getBackingStore();
+                    const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+                    const ab_data = backing_store.getData();
+                    if (ab_data) |ptr| {
+                        const remaining = data_buf.len - offset;
+                        const copy_len = @min(ab_len, remaining);
+                        const byte_ptr: [*]const u8 = @ptrCast(ptr);
+                        @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[0..copy_len]);
+                        offset += copy_len;
+                    }
+                } else if (elem.isArrayBufferView()) {
+                    const view = js.asArrayBufferView(elem);
+                    const view_len = view.getByteLength();
+                    const view_offset = view.getByteOffset();
+                    const ab = view.getBuffer();
+                    const shared_ptr = ab.getBackingStore();
+                    const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+                    const ab_data = backing_store.getData();
+                    if (ab_data) |ptr| {
+                        const remaining = data_buf.len - offset;
+                        const copy_len = @min(view_len, remaining);
+                        const byte_ptr: [*]const u8 = @ptrCast(ptr);
+                        @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[view_offset .. view_offset + copy_len]);
+                        offset += copy_len;
+                    }
                 }
             }
 

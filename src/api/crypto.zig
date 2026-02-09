@@ -110,40 +110,74 @@ fn digestCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
     var algo_buf: [32]u8 = undefined;
     const algo = js.readString(ctx.isolate, algo_str, &algo_buf);
 
-    // Get data as string
-    const data_str = ctx.arg(1).toString(ctx.context) catch {
-        js.throw(ctx.isolate, "digest: invalid data");
-        return;
-    };
+    // Get data — support string, ArrayBuffer, or ArrayBufferView
+    var data_storage: [8192]u8 = undefined;
+    var data: []const u8 = undefined;
 
-    var data_buf: [8192]u8 = undefined;
-    const data = js.readString(ctx.isolate, data_str, &data_buf);
+    if (ctx.arg(1).isArrayBuffer()) {
+        const ab = js.asArrayBuffer(ctx.arg(1));
+        const ab_len = ab.getByteLength();
+        const shared_ptr = ab.getBackingStore();
+        const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+        const ab_data = backing_store.getData();
+        if (ab_data) |ptr| {
+            const copy_len = @min(ab_len, data_storage.len);
+            const byte_ptr: [*]const u8 = @ptrCast(ptr);
+            @memcpy(data_storage[0..copy_len], byte_ptr[0..copy_len]);
+            data = data_storage[0..copy_len];
+        } else {
+            data = &[_]u8{};
+        }
+    } else if (ctx.arg(1).isArrayBufferView()) {
+        const view = js.asArrayBufferView(ctx.arg(1));
+        const view_len = view.getByteLength();
+        const view_offset = view.getByteOffset();
+        const ab = view.getBuffer();
+        const shared_ptr = ab.getBackingStore();
+        const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
+        const ab_data = backing_store.getData();
+        if (ab_data) |ptr| {
+            const copy_len = @min(view_len, data_storage.len);
+            const byte_ptr: [*]const u8 = @ptrCast(ptr);
+            @memcpy(data_storage[0..copy_len], byte_ptr[view_offset .. view_offset + copy_len]);
+            data = data_storage[0..copy_len];
+        } else {
+            data = &[_]u8{};
+        }
+    } else {
+        // Fall back to string input
+        const data_str = ctx.arg(1).toString(ctx.context) catch {
+            js.throw(ctx.isolate, "digest: invalid data");
+            return;
+        };
+        data = js.readString(ctx.isolate, data_str, &data_storage);
+    }
 
     // Compute hash based on algorithm
     if (std.mem.eql(u8, algo, "SHA-256") or std.mem.eql(u8, algo, "sha-256")) {
         var hash: [32]u8 = undefined;
         std.crypto.hash.sha2.Sha256.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
+        returnHashAsPromise(ctx, &hash);
     } else if (std.mem.eql(u8, algo, "SHA-384") or std.mem.eql(u8, algo, "sha-384")) {
         var hash: [48]u8 = undefined;
         std.crypto.hash.sha2.Sha384.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
+        returnHashAsPromise(ctx, &hash);
     } else if (std.mem.eql(u8, algo, "SHA-512") or std.mem.eql(u8, algo, "sha-512")) {
         var hash: [64]u8 = undefined;
         std.crypto.hash.sha2.Sha512.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
+        returnHashAsPromise(ctx, &hash);
     } else if (std.mem.eql(u8, algo, "SHA-1") or std.mem.eql(u8, algo, "sha-1")) {
         var hash: [20]u8 = undefined;
         std.crypto.hash.Sha1.hash(data, &hash, .{});
-        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &hash);
+        returnHashAsPromise(ctx, &hash);
     } else {
         js.throw(ctx.isolate, "digest: unsupported algorithm");
         return;
     }
 }
 
-fn returnHashAsArrayBuffer(isolate: v8.Isolate, info: v8.FunctionCallbackInfo, hash: []const u8) void {
-    const backing = v8.BackingStore.init(isolate, hash.len);
+fn returnHashAsPromise(ctx: js.CallbackContext, hash: []const u8) void {
+    const backing = v8.BackingStore.init(ctx.isolate, hash.len);
     const data = backing.getData();
 
     if (data) |ptr| {
@@ -152,8 +186,8 @@ fn returnHashAsArrayBuffer(isolate: v8.Isolate, info: v8.FunctionCallbackInfo, h
     }
 
     const shared_ptr = backing.toSharedPtr();
-    const array_buffer = v8.ArrayBuffer.initWithBackingStore(isolate, &shared_ptr);
-    info.getReturnValue().set(v8.Value{ .handle = array_buffer.handle });
+    const array_buffer = v8.ArrayBuffer.initWithBackingStore(ctx.isolate, &shared_ptr);
+    js.retResolvedPromise(ctx, v8.Value{ .handle = array_buffer.handle });
 }
 
 /// crypto.subtle.sign(algorithm, key, data)
@@ -230,19 +264,19 @@ fn signCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         var hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(key);
         hmac.update(data);
         hmac.final(&mac);
-        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &mac);
+        returnHashAsPromise(ctx, &mac);
     } else if (std.mem.eql(u8, hash_algo, "SHA-384") or std.mem.eql(u8, hash_algo, "sha-384")) {
         var mac: [48]u8 = undefined;
         var hmac = std.crypto.auth.hmac.sha2.HmacSha384.init(key);
         hmac.update(data);
         hmac.final(&mac);
-        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &mac);
+        returnHashAsPromise(ctx, &mac);
     } else if (std.mem.eql(u8, hash_algo, "SHA-512") or std.mem.eql(u8, hash_algo, "sha-512")) {
         var mac: [64]u8 = undefined;
         var hmac = std.crypto.auth.hmac.sha2.HmacSha512.init(key);
         hmac.update(data);
         hmac.final(&mac);
-        returnHashAsArrayBuffer(ctx.isolate, ctx.info, &mac);
+        returnHashAsPromise(ctx, &mac);
     } else {
         js.throw(ctx.isolate, "sign: unsupported algorithm (use HMAC with SHA-256/384/512)");
         return;
@@ -381,5 +415,5 @@ fn verifyCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void
         }
     }
 
-    js.retBool(ctx, result);
+    js.retResolvedPromise(ctx, v8.Value{ .handle = js.boolean(ctx.isolate, result).handle });
 }
