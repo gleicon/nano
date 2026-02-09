@@ -437,7 +437,6 @@ fn responseConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c)
 
     // Default values
     var status: f64 = 200;
-    const status_text: []const u8 = "OK";
 
     // First argument: body (optional)
     if (info.length() >= 1) {
@@ -513,10 +512,13 @@ fn responseConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c)
 
     _ = this.setValue(context, v8.String.initUtf8(isolate, "_status"), v8.Number.init(isolate, status).toValue());
 
-    // Set default statusText if not already set
+    // Set default statusText if not already set (map status code to standard reason phrase)
     const existing_st = this.getValue(context, v8.String.initUtf8(isolate, "_statusText")) catch null;
     if (existing_st == null or existing_st.?.isUndefined()) {
-        _ = this.setValue(context, v8.String.initUtf8(isolate, "_statusText"), v8.String.initUtf8(isolate, status_text).toValue());
+        const status_int: u16 = @intFromFloat(status);
+        const http_status: http.Status = @enumFromInt(status_int);
+        const reason = http_status.phrase() orelse "Unknown";
+        _ = this.setValue(context, v8.String.initUtf8(isolate, "_statusText"), v8.String.initUtf8(isolate, reason).toValue());
     }
 
     // Set default headers if not already set
