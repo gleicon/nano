@@ -13,8 +13,13 @@ pub fn registerBlobAPI(isolate: v8.Isolate, context: v8.Context) void {
     const blob_tmpl = v8.FunctionTemplate.initCallback(isolate, blobConstructor);
     const blob_proto = blob_tmpl.getPrototypeTemplate();
 
-    js.addMethod(blob_proto, isolate, "size", blobSize);
-    js.addMethod(blob_proto, isolate, "type", blobType);
+    // size and type are getter properties per WinterCG spec (accessed without parentheses)
+    const size_getter = v8.FunctionTemplate.initCallback(isolate, blobSize);
+    blob_proto.setAccessorGetter(js.string(isolate, "size").toName(), size_getter);
+
+    const type_getter = v8.FunctionTemplate.initCallback(isolate, blobType);
+    blob_proto.setAccessorGetter(js.string(isolate, "type").toName(), type_getter);
+
     js.addMethod(blob_proto, isolate, "text", blobText);
     js.addMethod(blob_proto, isolate, "arrayBuffer", blobArrayBuffer);
     js.addMethod(blob_proto, isolate, "slice", blobSlice);
@@ -25,16 +30,23 @@ pub fn registerBlobAPI(isolate: v8.Isolate, context: v8.Context) void {
     const file_tmpl = v8.FunctionTemplate.initCallback(isolate, fileConstructor);
     const file_proto = file_tmpl.getPrototypeTemplate();
 
-    // Inherit Blob methods
-    js.addMethod(file_proto, isolate, "size", blobSize);
-    js.addMethod(file_proto, isolate, "type", blobType);
+    // Inherit Blob getter properties
+    const file_size_getter = v8.FunctionTemplate.initCallback(isolate, blobSize);
+    file_proto.setAccessorGetter(js.string(isolate, "size").toName(), file_size_getter);
+
+    const file_type_getter = v8.FunctionTemplate.initCallback(isolate, blobType);
+    file_proto.setAccessorGetter(js.string(isolate, "type").toName(), file_type_getter);
+
     js.addMethod(file_proto, isolate, "text", blobText);
     js.addMethod(file_proto, isolate, "arrayBuffer", blobArrayBuffer);
     js.addMethod(file_proto, isolate, "slice", blobSlice);
 
-    // File-specific methods
-    js.addMethod(file_proto, isolate, "name", fileName);
-    js.addMethod(file_proto, isolate, "lastModified", fileLastModified);
+    // File-specific getter properties
+    const name_getter = v8.FunctionTemplate.initCallback(isolate, fileName);
+    file_proto.setAccessorGetter(js.string(isolate, "name").toName(), name_getter);
+
+    const last_modified_getter = v8.FunctionTemplate.initCallback(isolate, fileLastModified);
+    file_proto.setAccessorGetter(js.string(isolate, "lastModified").toName(), last_modified_getter);
 
     js.addGlobalClass(global, context, isolate, "File", file_tmpl);
 }
@@ -173,87 +185,56 @@ fn blobType(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 fn blobText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const ctx = js.CallbackContext.init(raw_info);
 
+    const empty = js.string(ctx.isolate, "").toValue();
+
     // Get base64 encoded data
-    const data_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_data") catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.resolve(ctx.context, js.string(ctx.isolate, "").toValue());
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    const data_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_data") catch
+        return js.retResolvedPromise(ctx, empty);
 
     // Decode base64
     var data_buf: [65536]u8 = undefined;
-    const data_str = data_val.toString(ctx.context) catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.resolve(ctx.context, js.string(ctx.isolate, "").toValue());
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    const data_str = data_val.toString(ctx.context) catch
+        return js.retResolvedPromise(ctx, empty);
     const encoded_data = js.readString(ctx.isolate, data_str, &data_buf);
 
     const base64_decoder = std.base64.standard;
-    const decoded_len = base64_decoder.Decoder.calcSizeForSlice(encoded_data) catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.resolve(ctx.context, js.string(ctx.isolate, "").toValue());
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    const decoded_len = base64_decoder.Decoder.calcSizeForSlice(encoded_data) catch
+        return js.retResolvedPromise(ctx, empty);
 
     var decoded_buf: [65536]u8 = undefined;
-    base64_decoder.Decoder.decode(decoded_buf[0..decoded_len], encoded_data) catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.resolve(ctx.context, js.string(ctx.isolate, "").toValue());
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    base64_decoder.Decoder.decode(decoded_buf[0..decoded_len], encoded_data) catch
+        return js.retResolvedPromise(ctx, empty);
 
-    const resolver = v8.PromiseResolver.init(ctx.context);
-    _ = resolver.resolve(ctx.context, js.string(ctx.isolate, decoded_buf[0..decoded_len]).toValue());
-    js.ret(ctx, resolver.getPromise());
+    js.retResolvedPromise(ctx, js.string(ctx.isolate, decoded_buf[0..decoded_len]).toValue());
 }
 
 fn blobArrayBuffer(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const ctx = js.CallbackContext.init(raw_info);
 
     // Get size
-    const size_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_size") catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.reject(ctx.context, js.string(ctx.isolate, "Failed to get blob size").toValue());
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    const size_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_size") catch
+        return js.retRejectedPromise(ctx, js.string(ctx.isolate, "Failed to get blob size").toValue());
 
     const size_f = size_val.toF64(ctx.context) catch 0;
     const size: usize = @intFromFloat(size_f);
 
     // Create ArrayBuffer
     const ab = v8.ArrayBuffer.init(ctx.isolate, size);
+    const ab_value = v8.Value{ .handle = @ptrCast(ab.handle) };
 
     // Get data and decode
-    const data_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_data") catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.resolve(ctx.context, v8.Value{ .handle = @ptrCast(ab.handle) });
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    const data_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_data") catch
+        return js.retResolvedPromise(ctx, ab_value);
 
     var data_buf: [65536]u8 = undefined;
-    const data_str = data_val.toString(ctx.context) catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.resolve(ctx.context, v8.Value{ .handle = @ptrCast(ab.handle) });
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    const data_str = data_val.toString(ctx.context) catch
+        return js.retResolvedPromise(ctx, ab_value);
     const encoded_data = js.readString(ctx.isolate, data_str, &data_buf);
 
     // Decode base64 and copy to ArrayBuffer
     const base64_decoder = std.base64.standard;
-    const decoded_len = base64_decoder.Decoder.calcSizeForSlice(encoded_data) catch {
-        const resolver = v8.PromiseResolver.init(ctx.context);
-        _ = resolver.resolve(ctx.context, v8.Value{ .handle = @ptrCast(ab.handle) });
-        js.ret(ctx, resolver.getPromise());
-        return;
-    };
+    const decoded_len = base64_decoder.Decoder.calcSizeForSlice(encoded_data) catch
+        return js.retResolvedPromise(ctx, ab_value);
 
     const shared_ptr = ab.getBackingStore();
     const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
@@ -265,9 +246,7 @@ fn blobArrayBuffer(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
         @memcpy(byte_ptr[0..decoded_len], decoded_buf[0..decoded_len]);
     }
 
-    const resolver = v8.PromiseResolver.init(ctx.context);
-    _ = resolver.resolve(ctx.context, v8.Value{ .handle = @ptrCast(ab.handle) });
-    js.ret(ctx, resolver.getPromise());
+    js.retResolvedPromise(ctx, ab_value);
 }
 
 fn blobSlice(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
@@ -343,11 +322,60 @@ fn blobSlice(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    // Copy sliced data (simplified)
+    // Slice the actual base64-encoded data
     const slice_size: usize = @intCast(end - start);
     _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_size", js.number(ctx.isolate, slice_size));
     _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_type", js.string(ctx.isolate, content_type));
-    _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+
+    // Get the parent blob's base64 data, decode, slice, re-encode
+    const data_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_data") catch {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+        js.ret(ctx, new_blob);
+        return;
+    };
+    var encoded_buf: [65536]u8 = undefined;
+    const data_str = data_val.toString(ctx.context) catch {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+        js.ret(ctx, new_blob);
+        return;
+    };
+    const encoded_data = js.readString(ctx.isolate, data_str, &encoded_buf);
+
+    if (encoded_data.len == 0 or slice_size == 0) {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+        js.ret(ctx, new_blob);
+        return;
+    }
+
+    // Decode parent data
+    const base64_decoder = std.base64.standard;
+    const decoded_len = base64_decoder.Decoder.calcSizeForSlice(encoded_data) catch {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+        js.ret(ctx, new_blob);
+        return;
+    };
+    var decoded_buf: [65536]u8 = undefined;
+    base64_decoder.Decoder.decode(decoded_buf[0..decoded_len], encoded_data) catch {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+        js.ret(ctx, new_blob);
+        return;
+    };
+
+    // Slice the decoded data
+    const start_u: usize = @intCast(start);
+    const end_u: usize = @intCast(end);
+    const sliced = decoded_buf[start_u..@min(end_u, decoded_len)];
+
+    // Re-encode the slice as base64
+    const base64_encoder = std.base64.standard;
+    const re_encoded_len = base64_encoder.Encoder.calcSize(sliced.len);
+    if (re_encoded_len <= 65536) {
+        var re_encoded_buf: [65536]u8 = undefined;
+        _ = base64_encoder.Encoder.encode(re_encoded_buf[0..re_encoded_len], sliced);
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, re_encoded_buf[0..re_encoded_len]));
+    } else {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+    }
 
     js.ret(ctx, new_blob);
 }
