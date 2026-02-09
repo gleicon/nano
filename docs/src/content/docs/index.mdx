@@ -1,40 +1,60 @@
 ---
-title: Welcome to Starlight
-description: Get started building your docs site with Starlight.
-template: splash # Remove or comment out this line to display the site sidebar on this page.
+title: NANO
+description: JavaScript runtime for serverless workloads
+template: splash
 hero:
-  tagline: Congrats on setting up a new Starlight project!
-  image:
-    file: ../../assets/houston.webp
+  tagline: Ultra-dense JavaScript runtime for multi-app hosting
   actions:
-    - text: Example Guide
-      link: /guides/example/
+    - text: Get Started
+      link: /getting-started/install/
       icon: right-arrow
-    - text: Read the Starlight docs
-      link: https://starlight.astro.build
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/gleicon/nano
       icon: external
       variant: minimal
 ---
 
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-## Next steps
+## What is NANO?
+
+NANO is a lightweight JavaScript runtime built with Zig and V8 that hosts multiple applications in a single process using V8 isolates. Think of it like a browser with tabs — each tab is an isolated app, but they share one process.
+
+**Skip the container fleet entirely.** One NANO process replaces dozens of Node containers, their image builds, fleet management, and routing infrastructure — while maintaining isolation between apps.
+
+## Key Features
 
 <CardGrid stagger>
-	<Card title="Update content" icon="pencil">
-		Edit `src/content/docs/index.mdx` to see this page change.
+	<Card title="Workers API Compatible" icon="rocket">
+		Run Cloudflare Workers-compatible code with familiar APIs: fetch, Request/Response, crypto, and more.
 	</Card>
-	<Card title="Change page layout" icon="document">
-		Delete `template: splash` in `src/content/docs/index.mdx` to display a
-		sidebar on this page.
+	<Card title="Multi-App Hosting" icon="puzzle">
+		Host multiple isolated applications on a single port with virtual host routing and hot reload.
 	</Card>
-	<Card title="Add new content" icon="add-document">
-		Add Markdown or MDX files to `src/content/docs` to create new pages.
+	<Card title="V8-Powered" icon="star">
+		Full ES2023+ support with battle-tested V8 JavaScript engine and async/await handling.
 	</Card>
-	<Card title="Configure your site" icon="setting">
-		Edit your `sidebar` and other config in `astro.config.mjs`.
-	</Card>
-	<Card title="Read the docs" icon="open-book">
-		Learn more in [the Starlight Docs](https://starlight.astro.build/).
+	<Card title="Production Ready" icon="approve-check">
+		Built-in metrics, structured logging, CPU watchdog, memory limits, and graceful shutdown.
 	</Card>
 </CardGrid>
+
+## Quick Start
+
+```bash
+# Clone and build
+git clone https://github.com/gleicon/nano.git
+cd nano
+zig build
+
+# Run your first app
+./zig-out/bin/nano serve --port 3000 --app ./my-app
+```
+
+## Learn More
+
+- [Installation Guide](/getting-started/install/) - Build NANO from source
+- [Your First App](/getting-started/first-app/) - Create and deploy a simple app
+- [Configuration](/config/) - Configure multi-app hosting
+- [API Reference](/api/) - Explore available JavaScript APIs
