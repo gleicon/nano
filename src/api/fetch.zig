@@ -1,5 +1,6 @@
 const std = @import("std");
 const v8 = @import("v8");
+const js = @import("js");
 const http = std.http;
 
 /// Allocator for HTTP operations
@@ -102,18 +103,18 @@ pub fn registerFetchAPI(isolate: v8.Isolate, context: v8.Context) void {
     const response_tmpl = v8.FunctionTemplate.initCallback(isolate, responseConstructor);
     const response_proto = response_tmpl.getPrototypeTemplate();
 
-    // Response instance methods
-    const status_fn = v8.FunctionTemplate.initCallback(isolate, responseStatus);
-    response_proto.set(v8.String.initUtf8(isolate, "status").toName(), status_fn, v8.PropertyAttribute.None);
+    // Response properties as accessor getters per WinterCG spec (accessed without parentheses)
+    const status_getter = v8.FunctionTemplate.initCallback(isolate, responseStatus);
+    response_proto.setAccessorGetter(v8.String.initUtf8(isolate, "status").toName(), status_getter);
 
-    const ok_fn = v8.FunctionTemplate.initCallback(isolate, responseOk);
-    response_proto.set(v8.String.initUtf8(isolate, "ok").toName(), ok_fn, v8.PropertyAttribute.None);
+    const ok_getter = v8.FunctionTemplate.initCallback(isolate, responseOk);
+    response_proto.setAccessorGetter(v8.String.initUtf8(isolate, "ok").toName(), ok_getter);
 
-    const statusText_fn = v8.FunctionTemplate.initCallback(isolate, responseStatusText);
-    response_proto.set(v8.String.initUtf8(isolate, "statusText").toName(), statusText_fn, v8.PropertyAttribute.None);
+    const statusText_getter = v8.FunctionTemplate.initCallback(isolate, responseStatusText);
+    response_proto.setAccessorGetter(v8.String.initUtf8(isolate, "statusText").toName(), statusText_getter);
 
-    const headers_fn = v8.FunctionTemplate.initCallback(isolate, responseHeaders);
-    response_proto.set(v8.String.initUtf8(isolate, "headers").toName(), headers_fn, v8.PropertyAttribute.None);
+    const headers_getter = v8.FunctionTemplate.initCallback(isolate, responseHeaders);
+    response_proto.setAccessorGetter(v8.String.initUtf8(isolate, "headers").toName(), headers_getter);
 
     // body is a getter property (not a method) per WinterCG spec
     const body_getter = v8.FunctionTemplate.initCallback(isolate, responseBody);
@@ -153,7 +154,7 @@ fn fetchCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void 
     const context = isolate.getCurrentContext();
 
     if (info.length() < 1) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "fetch() requires a URL or Request argument").toValue());
+        js.throw(isolate, "fetch() requires a URL or Request argument");
         return;
     }
 
@@ -670,14 +671,14 @@ fn responseText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 
         // Get the getReader method
         const get_reader_val = stream_obj.getValue(context, v8.String.initUtf8(isolate, "getReader")) catch {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: stream has no getReader").toValue());
+            js.throw(isolate, "text: stream has no getReader");
             return;
         };
         const get_reader_fn = v8.Function{ .handle = @ptrCast(get_reader_val.handle) };
 
         // Call getReader()
         const reader_val = get_reader_fn.call(context, stream_val.?, &[_]v8.Value{}) orelse {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: getReader failed").toValue());
+            js.throw(isolate, "text: getReader failed");
             return;
         };
 
@@ -697,11 +698,11 @@ fn responseText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 
         const reader_fn_str = v8.String.initUtf8(isolate, reader_code);
         var reader_script = v8.Script.compile(context, reader_fn_str, null) catch {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: failed to compile reader").toValue());
+            js.throw(isolate, "text: failed to compile reader");
             return;
         };
         const reader_factory_val = reader_script.run(context) catch {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: failed to run reader factory").toValue());
+            js.throw(isolate, "text: failed to run reader factory");
             return;
         };
         const reader_factory = v8.Function{ .handle = @ptrCast(reader_factory_val.handle) };
@@ -709,7 +710,7 @@ fn responseText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         // Call the async function with reader
         var reader_args: [1]v8.Value = .{reader_val};
         const result_promise_val = reader_factory.call(context, isolate.initUndefined().toValue(), &reader_args) orelse {
-            _ = isolate.throwException(v8.String.initUtf8(isolate, "text: reader function failed").toValue());
+            js.throw(isolate, "text: reader function failed");
             return;
         };
 
@@ -741,13 +742,13 @@ fn responseJson(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 
     // Call this.text() to get body as string (handles both stream and string bodies)
     const text_fn_val = this.getValue(context, v8.String.initUtf8(isolate, "text")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: text method not found").toValue());
+        js.throw(isolate, "json: text method not found");
         return;
     };
     const text_fn = v8.Function{ .handle = @ptrCast(text_fn_val.handle) };
 
     const text_promise_val = text_fn.call(context, v8.Value{ .handle = @ptrCast(this.handle) }, &[_]v8.Value{}) orelse {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: text() failed").toValue());
+        js.throw(isolate, "json: text() failed");
         return;
     };
 
@@ -761,18 +762,18 @@ fn responseJson(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 
     const json_fn_str = v8.String.initUtf8(isolate, json_code);
     var json_script = v8.Script.compile(context, json_fn_str, null) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: failed to compile parser").toValue());
+        js.throw(isolate, "json: failed to compile parser");
         return;
     };
     const json_factory_val = json_script.run(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: failed to run parser factory").toValue());
+        js.throw(isolate, "json: failed to run parser factory");
         return;
     };
     const json_factory = v8.Function{ .handle = @ptrCast(json_factory_val.handle) };
 
     var json_args: [1]v8.Value = .{text_promise_val};
     const result_val = json_factory.call(context, isolate.initUndefined().toValue(), &json_args) orelse {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "json: parser function failed").toValue());
+        js.throw(isolate, "json: parser function failed");
         return;
     };
 
@@ -786,7 +787,7 @@ fn responseJsonStatic(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
     const context = isolate.getCurrentContext();
 
     if (info.length() < 1) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.json requires data argument").toValue());
+        js.throw(isolate, "Response.json requires data argument");
         return;
     }
 
@@ -795,20 +796,20 @@ fn responseJsonStatic(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
     // Stringify the data
     const global = context.getGlobal();
     const json_val = global.getValue(context, v8.String.initUtf8(isolate, "JSON")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.json: JSON not found").toValue());
+        js.throw(isolate, "Response.json: JSON not found");
         return;
     };
 
     const json_obj = v8.Object{ .handle = @ptrCast(json_val.handle) };
     const stringify_fn_val = json_obj.getValue(context, v8.String.initUtf8(isolate, "stringify")) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.json: JSON.stringify not found").toValue());
+        js.throw(isolate, "Response.json: JSON.stringify not found");
         return;
     };
 
     const stringify_fn = v8.Function{ .handle = @ptrCast(stringify_fn_val.handle) };
     var stringify_args: [1]v8.Value = .{data};
     const body_str = stringify_fn.call(context, json_val, &stringify_args) orelse {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.json: stringify failed").toValue());
+        js.throw(isolate, "Response.json: stringify failed");
         return;
     };
 
@@ -851,7 +852,7 @@ fn responseJsonStatic(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) 
 
     var ctor_args: [2]v8.Value = .{ body_str, v8.Value{ .handle = @ptrCast(opts.handle) } };
     const response = response_ctor.initInstance(context, &ctor_args) orelse {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.json: failed to create Response").toValue());
+        js.throw(isolate, "Response.json: failed to create Response");
         return;
     };
 
@@ -916,7 +917,7 @@ fn responseRedirect(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) vo
     const context = isolate.getCurrentContext();
 
     if (info.length() < 1) {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.redirect requires URL argument").toValue());
+        js.throw(isolate, "Response.redirect requires URL argument");
         return;
     }
 
@@ -940,7 +941,7 @@ fn responseRedirect(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) vo
 
     const hdrs = isolate.initObjectTemplateDefault().initInstance(context);
     const url_str = url.toString(context) catch {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.redirect: invalid URL").toValue());
+        js.throw(isolate, "Response.redirect: invalid URL");
         return;
     };
     _ = hdrs.setValue(context, v8.String.initUtf8(isolate, "location"), url_str.toValue());
@@ -948,7 +949,7 @@ fn responseRedirect(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) vo
 
     var ctor_args: [2]v8.Value = .{ isolate.initNull().toValue(), v8.Value{ .handle = @ptrCast(opts.handle) } };
     const response = response_ctor.initInstance(context, &ctor_args) orelse {
-        _ = isolate.throwException(v8.String.initUtf8(isolate, "Response.redirect: failed to create Response").toValue());
+        js.throw(isolate, "Response.redirect: failed to create Response");
         return;
     };
 

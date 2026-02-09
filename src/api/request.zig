@@ -10,9 +10,16 @@ pub fn registerRequestAPI(isolate: v8.Isolate, context: v8.Context) void {
     const request_tmpl = v8.FunctionTemplate.initCallback(isolate, requestConstructor);
     const request_proto = request_tmpl.getPrototypeTemplate();
 
-    js.addMethod(request_proto, isolate, "url", requestUrl);
-    js.addMethod(request_proto, isolate, "method", requestMethod);
-    js.addMethod(request_proto, isolate, "headers", requestHeaders);
+    // url, method, headers are getter properties per WinterCG spec (accessed without parentheses)
+    const url_getter = v8.FunctionTemplate.initCallback(isolate, requestUrl);
+    request_proto.setAccessorGetter(js.string(isolate, "url").toName(), url_getter);
+
+    const method_getter = v8.FunctionTemplate.initCallback(isolate, requestMethod);
+    request_proto.setAccessorGetter(js.string(isolate, "method").toName(), method_getter);
+
+    const headers_getter = v8.FunctionTemplate.initCallback(isolate, requestHeaders);
+    request_proto.setAccessorGetter(js.string(isolate, "headers").toName(), headers_getter);
+
     js.addMethod(request_proto, isolate, "text", requestText);
     js.addMethod(request_proto, isolate, "json", requestJson);
 
@@ -107,22 +114,22 @@ fn requestText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const ctx = js.CallbackContext.init(raw_info);
 
     const val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_body") catch {
-        js.retString(ctx, "");
+        js.retResolvedPromise(ctx, js.string(ctx.isolate, "").toValue());
         return;
     };
-    js.ret(ctx, val);
+    js.retResolvedPromise(ctx, val);
 }
 
 fn requestJson(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const ctx = js.CallbackContext.init(raw_info);
 
     const body_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_body") catch {
-        js.throw(ctx.isolate, "Request.json: no body");
+        js.retRejectedPromise(ctx, js.string(ctx.isolate, "Request.json: no body").toValue());
         return;
     };
 
     const body_str = body_val.toString(ctx.context) catch {
-        js.throw(ctx.isolate, "Request.json: invalid body");
+        js.retRejectedPromise(ctx, js.string(ctx.isolate, "Request.json: invalid body").toValue());
         return;
     };
 
@@ -132,24 +139,24 @@ fn requestJson(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     // Use V8's JSON.parse
     const global = ctx.context.getGlobal();
     const json_val = js.getProp(global, ctx.context, ctx.isolate, "JSON") catch {
-        js.throw(ctx.isolate, "Request.json: JSON not found");
+        js.retRejectedPromise(ctx, js.string(ctx.isolate, "Request.json: JSON not found").toValue());
         return;
     };
 
     const json_obj = js.asObject(json_val);
     const parse_fn_val = js.getProp(json_obj, ctx.context, ctx.isolate, "parse") catch {
-        js.throw(ctx.isolate, "Request.json: JSON.parse not found");
+        js.retRejectedPromise(ctx, js.string(ctx.isolate, "Request.json: JSON.parse not found").toValue());
         return;
     };
 
     const parse_fn = js.asFunction(parse_fn_val);
     var args: [1]v8.Value = .{js.string(ctx.isolate, body).toValue()};
     const result = parse_fn.call(ctx.context, json_val, &args) orelse {
-        js.throw(ctx.isolate, "Request.json: parse failed");
+        js.retRejectedPromise(ctx, js.string(ctx.isolate, "Request.json: parse failed").toValue());
         return;
     };
 
-    js.ret(ctx, result);
+    js.retResolvedPromise(ctx, result);
 }
 
 /// Create a Request object from Zig HTTP request data
