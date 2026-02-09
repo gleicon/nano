@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
-**Current focus:** Phase v1.2-05 API Spec Compliance — Plan 01 complete (properties to getters)
+**Current focus:** Phase v1.2-05 API Spec Compliance — Plan 02 complete (Headers/Blob/crypto binary support)
 
 ## Current Position
 
 Phase: v1.2-05 of 6 (API Spec Compliance)
-Plan: 1 of 3 complete
-Status: Plan 01 complete — converted 24 WinterCG properties to accessor getters
-Last activity: 2026-02-09 — Completed v1.2-05-01 property-to-getter migration
+Plan: 2 of 3 complete
+Status: Plan 02 complete — Headers API fixes and binary data support
+Last activity: 2026-02-09 — Completed v1.2-05-02 Headers/Blob/crypto binary support
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
@@ -32,8 +32,8 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
-- v1.2: 8 plans complete (4 phases done + v1.2-05 plan 1)
-- Total: 28 plans, 12 phases
+- v1.2: 9 plans complete (4 phases done + v1.2-05 plans 1-2)
+- Total: 29 plans, 12 phases
 
 ## Accumulated Context
 
@@ -60,6 +60,12 @@ Key architectural decisions:
 - setAccessorGetter with .toName() is the standard pattern for all WinterCG spec properties
 - Getter vs method distinction: properties that return data use getters, actions (text/json/etc) use methods
 
+**Recent (v1.2-05-02):**
+- Headers.delete() requires rebuilding _keys array to properly remove deleted entries from iteration
+- Headers.append() uses WHATWG comma-separated multi-value pattern for headers like Set-Cookie
+- V8 BackingStore pattern (getData + @ptrCast) is standard for ArrayBuffer/Uint8Array access
+- Binary data support extends to Blob/File constructors and crypto.subtle.digest
+
 ### Pending Todos
 
 None.
@@ -71,26 +77,22 @@ None.
 ## Session Continuity
 
 Last session: 2026-02-09
-Stopped at: Completed v1.2-05-01-PLAN.md (property-to-getter migration)
+Stopped at: Completed v1.2-05-02-PLAN.md (Headers/Blob/crypto binary support)
 Resume file: None
 
 ## Next Steps
 
-Phase v1.2-05 plan 01 complete (1/3 plans). Continue with:
-- v1.2-05-02: Headers API fixes (delete, append, entries iteration)
-- v1.2-05-03: Remaining compliance (Blob binary parts, crypto BufferSource, console inspection)
+Phase v1.2-05 plan 02 complete (2/3 plans). Continue with:
+- v1.2-05-03: Final compliance fixes (remaining spec gaps)
 
-**v1.2-05-01 Deliverables Complete:**
-- 24 WinterCG properties converted to V8 accessor getters
-- blob.zig: Blob.size/type, File.size/type/name/lastModified
-- request.zig: Request.url/method/headers
-- fetch.zig: Response.status/ok/statusText/headers
-- url.zig: URL href/origin/protocol/host/hostname/port/pathname/search/hash
-- abort.zig: AbortController.signal
+**v1.2-05-02 Deliverables Complete:**
+- Headers.delete() properly removes keys (undefined marker + _keys rebuild)
+- Headers.append() with WHATWG comma-separated multi-value
+- Blob/File constructors accept ArrayBuffer and Uint8Array parts
+- crypto.subtle.digest accepts ArrayBuffer/Uint8Array input
 
-**Remaining pre-existing issues for v1.2-05:**
-- Headers.delete/append, Blob binary parts, crypto digest BufferSource
-- console.log object inspection
+**Remaining for v1.2-05:**
+- Plan 03: Final compliance fixes per RESEARCH.md
 
 ---
-*Last updated: 2026-02-09 after v1.2-05-01 completion*
+*Last updated: 2026-02-09 after v1.2-05-02 completion*
