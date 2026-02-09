@@ -25,7 +25,10 @@ pub fn registerAbortAPI(isolate: v8.Isolate, context: v8.Context) void {
     const controller_tmpl = v8.FunctionTemplate.initCallback(isolate, abortControllerConstructor);
     const controller_proto = controller_tmpl.getPrototypeTemplate();
 
-    js.addMethod(controller_proto, isolate, "signal", controllerSignal);
+    // signal is a getter property per WinterCG spec (accessed without parentheses)
+    const signal_getter = v8.FunctionTemplate.initCallback(isolate, controllerSignal);
+    controller_proto.setAccessorGetter(js.string(isolate, "signal").toName(), signal_getter);
+
     js.addMethod(controller_proto, isolate, "abort", controllerAbort);
 
     js.addGlobalClass(global, context, isolate, "AbortController", controller_tmpl);
@@ -104,8 +107,50 @@ fn signalAbortStatic(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) v
 fn signalTimeoutStatic(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const ctx = js.CallbackContext.init(raw_info);
 
-    // Simplified: creates non-aborted signal (full impl needs timer integration)
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "AbortSignal.timeout requires a milliseconds argument");
+        return;
+    }
+
+    const ms_val = ctx.arg(0);
+    if (!ms_val.isNumber()) {
+        js.throw(ctx.isolate, "AbortSignal.timeout: argument must be a number");
+        return;
+    }
+
+    // Create non-aborted signal
     const signal = createAbortSignal(ctx.isolate, ctx.context, false, null);
+
+    // Use embedded JS with setTimeout to abort after timeout
+    // Note: Uses Error (not DOMException which is not part of NANO's runtime)
+    const timeout_code =
+        \\(function(signal, ms) {
+        \\  setTimeout(function() {
+        \\    signal.aborted = true;
+        \\    var err = new Error("The operation was aborted due to timeout");
+        \\    err.name = "TimeoutError";
+        \\    signal.reason = err;
+        \\  }, ms);
+        \\})
+    ;
+
+    const code_str = v8.String.initUtf8(ctx.isolate, timeout_code);
+    const script = v8.Script.compile(ctx.context, code_str, null) catch {
+        // Fall back to non-timed signal if JS fails
+        js.ret(ctx, signal);
+        return;
+    };
+    const fn_val = script.run(ctx.context) catch {
+        js.ret(ctx, signal);
+        return;
+    };
+
+    if (fn_val.isFunction()) {
+        const timeout_fn = js.asFunction(fn_val);
+        var args: [2]v8.Value = .{ js.objToValue(signal), ms_val };
+        _ = timeout_fn.call(ctx.context, js.undefined_(ctx.isolate).toValue(), &args);
+    }
+
     js.ret(ctx, signal);
 }
 

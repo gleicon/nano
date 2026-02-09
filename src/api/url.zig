@@ -10,16 +10,35 @@ pub fn registerURLAPIs(isolate: v8.Isolate, context: v8.Context) void {
     const url_tmpl = v8.FunctionTemplate.initCallback(isolate, urlConstructor);
     const url_proto = url_tmpl.getPrototypeTemplate();
 
-    // URL property getters
-    js.addMethod(url_proto, isolate, "href", urlGetHref);
-    js.addMethod(url_proto, isolate, "origin", urlGetOrigin);
-    js.addMethod(url_proto, isolate, "protocol", urlGetProtocol);
-    js.addMethod(url_proto, isolate, "host", urlGetHost);
-    js.addMethod(url_proto, isolate, "hostname", urlGetHostname);
-    js.addMethod(url_proto, isolate, "port", urlGetPort);
-    js.addMethod(url_proto, isolate, "pathname", urlGetPathname);
-    js.addMethod(url_proto, isolate, "search", urlGetSearch);
-    js.addMethod(url_proto, isolate, "hash", urlGetHash);
+    // URL properties as accessor getters per WinterCG spec (accessed without parentheses)
+    const href_getter = v8.FunctionTemplate.initCallback(isolate, urlGetHref);
+    url_proto.setAccessorGetter(js.string(isolate, "href").toName(), href_getter);
+
+    const origin_getter = v8.FunctionTemplate.initCallback(isolate, urlGetOrigin);
+    url_proto.setAccessorGetter(js.string(isolate, "origin").toName(), origin_getter);
+
+    const protocol_getter = v8.FunctionTemplate.initCallback(isolate, urlGetProtocol);
+    url_proto.setAccessorGetter(js.string(isolate, "protocol").toName(), protocol_getter);
+
+    const host_getter = v8.FunctionTemplate.initCallback(isolate, urlGetHost);
+    url_proto.setAccessorGetter(js.string(isolate, "host").toName(), host_getter);
+
+    const hostname_getter = v8.FunctionTemplate.initCallback(isolate, urlGetHostname);
+    url_proto.setAccessorGetter(js.string(isolate, "hostname").toName(), hostname_getter);
+
+    const port_getter = v8.FunctionTemplate.initCallback(isolate, urlGetPort);
+    url_proto.setAccessorGetter(js.string(isolate, "port").toName(), port_getter);
+
+    const pathname_getter = v8.FunctionTemplate.initCallback(isolate, urlGetPathname);
+    url_proto.setAccessorGetter(js.string(isolate, "pathname").toName(), pathname_getter);
+
+    const search_getter = v8.FunctionTemplate.initCallback(isolate, urlGetSearch);
+    url_proto.setAccessorGetter(js.string(isolate, "search").toName(), search_getter);
+
+    const hash_getter = v8.FunctionTemplate.initCallback(isolate, urlGetHash);
+    url_proto.setAccessorGetter(js.string(isolate, "hash").toName(), hash_getter);
+
+    // toString remains a callable method per spec
     js.addMethod(url_proto, isolate, "toString", urlGetHref);
 
     js.addGlobalClass(global, context, isolate, "URL", url_tmpl);
