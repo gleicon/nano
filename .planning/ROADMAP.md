@@ -181,10 +181,11 @@ Plans:
 4. All Workers-compatible APIs are documented with WinterCG compliance notes
 5. Production deployment guide covers reverse proxy setup
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] v1.2-06-01: TBD
+- [ ] v1.2-06-01-PLAN.md — Astro + Starlight scaffold, Getting Started, Config reference
+- [ ] v1.2-06-02-PLAN.md — API reference, WinterCG compliance, Deployment guides
 
 ## Progress
 
@@ -197,7 +198,7 @@ Plans:
 | v1.2-03. Response Body | v1.2 | 1/1 | ✓ Complete | 2026-02-07 |
 | v1.2-04. Graceful Shutdown | v1.2 | 2/2 | ✓ Complete | 2026-02-08 |
 | v1.2-05. API Spec Compliance | v1.2 | 3/3 | ✓ Complete | 2026-02-08 |
-| v1.2-06. Documentation | v1.2 | 0/0 | Not started | - |
+| v1.2-06. Documentation | v1.2 | 0/2 | Not started | - |
 
 ## Pre-existing Issues Registry
 
@@ -228,4 +229,4 @@ Plans:
 - **v1.4+ (TBD):** Connection pooling / multi-threading (B-07), WebSocket, Cache API
 
 ---
-*Last updated: 2026-02-08 after v1.2-05 completion*
+*Last updated: 2026-02-09 after v1.2-06 planning*
