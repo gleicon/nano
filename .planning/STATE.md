@@ -5,18 +5,18 @@
 See: .planning/PROJECT.md (updated 2026-02-01)
 
 **Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
-**Current focus:** Phase v1.2-03 Response Body Integration COMPLETE
+**Current focus:** Phase v1.2-05 API Spec Compliance — Plan 01 complete (properties to getters)
 
 ## Current Position
 
-Phase: v1.2-03 of 5 (Response Body Integration)
-Plan: 1 of 1 complete
-Status: Phase complete - ready for v1.2-04
-Last activity: 2026-02-07 — Completed v1.2-03-01-PLAN.md (Response.body getter, ReadableStream reading fix)
+Phase: v1.2-05 of 6 (API Spec Compliance)
+Plan: 1 of 3 complete
+Status: Plan 01 complete — converted 24 WinterCG properties to accessor getters
+Last activity: 2026-02-09 — Completed v1.2-05-01 property-to-getter migration
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
-Progress: [########░░] 80% (v1.2)
+Progress: [########░░] 78% (v1.2)
 
 ## Shipped Milestones
 
@@ -32,8 +32,8 @@ See `.planning/MILESTONES.md` for details.
 **Velocity:**
 - v1.0: 14 plans in 8 days
 - v1.1: 3 plans in 14 days (includes research + audit time)
-- v1.2: 4 plans (Response Body Integration complete)
-- Total: 24 plans, 11 phases
+- v1.2: 8 plans complete (4 phases done + v1.2-05 plan 1)
+- Total: 28 plans, 12 phases
 
 ## Accumulated Context
 
@@ -48,26 +48,17 @@ Key architectural decisions:
 - Function pointer callbacks avoid circular imports
 - Admin /admin/* prefix for clear API separation
 
-**Recent (v1.2-01-01):**
-- Deep copy env HashMap for hot-reload safety (prevents use-after-free)
-- Pass env as second fetch parameter (Cloudflare Workers pattern)
-- Empty env object when no vars defined (consistent API)
+**Recent (v1.2-04):**
+- xev timer .rearm causes infinite spin with run(.no_wait) — use manual timer.run() with .disarm instead
+- processEventLoop must enter V8 isolate/HandleScope/Context independently of handleRequest
+- TryCatch around timer callbacks prevents exceptions from corrupting V8 state
+- DOMException not available in NANO runtime — use Error with name="TimeoutError"
+- js.throw() and js.retResolvedPromise/retRejectedPromise helpers eliminate boilerplate
+- Always force rebuild (rm -rf .zig-cache) — stale binaries cause phantom bugs
 
-**Recent (v1.2-02-01):**
-- Simplified async for MVP - full pending reads deferred to future iteration
-- Per-app stream buffer size limits (config.json max_buffer_size_mb, default 64MB)
-- V8 handle-based conversions for Boolean, Promise, Array types
-
-**Recent (v1.2-02-03):**
-- Embedded JavaScript for complex async stream operations (TransformStream, pipeTo, tee)
-- V8 Function.call() pattern simpler than replicating full async state machines in Zig
-- Simplified tee() implementation without perfect reader sharing (MVP focus)
-
-**Recent (v1.2-03-01):**
-- Response.body must use setAccessorGetter (property) not set (method) for WinterCG spec compliance
-- pull()-based ReadableStream avoids start()+close() synchronous hang bug
-- After calling pull() in readerRead, must re-check queue (V8 runs JS synchronously)
-- Guard V8 pending exceptions: check pull_fn.call() result before further V8 API calls
+**Recent (v1.2-05-01):**
+- setAccessorGetter with .toName() is the standard pattern for all WinterCG spec properties
+- Getter vs method distinction: properties that return data use getters, actions (text/json/etc) use methods
 
 ### Pending Todos
 
@@ -79,20 +70,27 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-07
-Stopped at: Completed v1.2-03-01 Response Body Integration
+Last session: 2026-02-09
+Stopped at: Completed v1.2-05-01-PLAN.md (property-to-getter migration)
 Resume file: None
 
 ## Next Steps
 
-Phase v1.2-03 complete (1/1 plans). Continue to v1.2-04:
-- v1.2-04: Graceful Shutdown
+Phase v1.2-05 plan 01 complete (1/3 plans). Continue with:
+- v1.2-05-02: Headers API fixes (delete, append, entries iteration)
+- v1.2-05-03: Remaining compliance (Blob binary parts, crypto BufferSource, console inspection)
 
-**Phase v1.2-03 Deliverables Complete:**
-- Response.body returns ReadableStream for string and stream bodies
-- Response constructor accepts ReadableStream body argument
-- response.text() and response.json() read from stream bodies
-- Pull-based ReadableStream reading works via reader.read()
+**v1.2-05-01 Deliverables Complete:**
+- 24 WinterCG properties converted to V8 accessor getters
+- blob.zig: Blob.size/type, File.size/type/name/lastModified
+- request.zig: Request.url/method/headers
+- fetch.zig: Response.status/ok/statusText/headers
+- url.zig: URL href/origin/protocol/host/hostname/port/pathname/search/hash
+- abort.zig: AbortController.signal
+
+**Remaining pre-existing issues for v1.2-05:**
+- Headers.delete/append, Blob binary parts, crypto digest BufferSource
+- console.log object inspection
 
 ---
-*Last updated: 2026-02-07 after v1.2-03-01 execution*
+*Last updated: 2026-02-09 after v1.2-05-01 completion*
