@@ -8,6 +8,19 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 **Skip the container fleet entirely.** One NANO process replaces dozens of Node containers, their image builds, fleet management, and routing infrastructure — while maintaining isolation between apps.
 
+## Current Milestone: v1.3 Limits & Compatibility
+
+**Goal:** Remove buffer limits, make fetch async, expand crypto suite, fix stream bugs, add missing WinterCG APIs, and make URL properties mutable.
+
+**Target features:**
+- Heap-allocated buffers replacing 64KB stack limits (B-01)
+- Async fetch() integrated with xev event loop (B-02)
+- WritableStream async sink support (B-03)
+- crypto.subtle expansion: AES-GCM, RSA-PSS, ECDSA, key management (B-04)
+- ReadableStream.tee() fix (B-05)
+- WinterCG essentials: structuredClone, queueMicrotask, performance.now (B-06)
+- URL mutable properties with setters (B-08)
+
 ## Current State (v1.2 Shipped)
 
 **Version:** v1.2 Production Polish (shipped 2026-02-09)
@@ -77,10 +90,23 @@ See BACKLOG.md for full details and suggested approaches.
 - API spec compliance (getter properties, Headers fixes, binary data) — v1.2
 - Documentation website (Astro + Starlight, 34 pages) — v1.2
 
+### Active (v1.3)
+
+- [ ] Heap-allocated buffers replacing stack limits (B-01)
+- [ ] Async fetch() with xev event loop integration (B-02)
+- [ ] WritableStream async sink support (B-03)
+- [ ] crypto.subtle expansion: AES-GCM, RSA, ECDSA, key mgmt (B-04)
+- [ ] ReadableStream.tee() data sharing fix (B-05)
+- [ ] WinterCG essentials: structuredClone, queueMicrotask, performance.now (B-06)
+- [ ] URL mutable properties with setters (B-08)
+
 ### Future (v2 candidates)
 
 - [ ] Sub-5ms cold start for new isolates (via V8 snapshots)
 - [ ] Isolate pooling (warm isolate reuse)
+- [ ] Multi-threaded server (B-07)
+- [ ] WebSocket support
+- [ ] Cache API
 
 ### Out of Scope
 
@@ -171,4 +197,4 @@ See BACKLOG.md for full details and suggested approaches.
 </details>
 
 ---
-*Last updated: 2026-02-09 after v1.2 milestone completion*
+*Last updated: 2026-02-09 after starting v1.3 milestone*

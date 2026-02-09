@@ -5,12 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-02-09)
 
 **Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
-**Current focus:** Between milestones — v1.2 shipped, ready for v1.3 planning
+**Current focus:** Milestone v1.3 Limits & Compatibility — researching
 
 ## Current Position
 
-Milestone: v1.2 Production Polish — SHIPPED 2026-02-09
-Status: All milestones complete, ready for next
+Milestone: v1.3 Limits & Compatibility
+Phase: Not started (defining requirements)
+Status: Researching domain ecosystem
+Last activity: 2026-02-09 — Milestone v1.3 started
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
@@ -56,11 +58,11 @@ Resume file: None
 
 ## Next Steps
 
-**v1.2 MILESTONE ARCHIVED**
+**v1.3 Milestone Started**
 
-**Ready for:**
-- `/gsd:new-milestone` to start v1.3 planning
-- Backlog items B-01 through B-08 available for v1.3 scope
+**Scope:** B-01 through B-06, B-08 (7 backlog items)
+**Research:** In progress (4 parallel researchers)
+**Next:** Define requirements → create roadmap
 
 ---
-*Last updated: 2026-02-09 after v1.2 milestone archival*
+*Last updated: 2026-02-09 after v1.3 milestone start*
