@@ -614,11 +614,11 @@ pub fn handleRequest(
         return .{ .status = status, .body = allocator.dupe(u8, "") catch "", .content_type = "text/plain" };
     };
 
-    var body_buf: [65536]u8 = undefined;
-    const body_len = body_str.writeUtf8(isolate, &body_buf);
-    const response_body = allocator.dupe(u8, body_buf[0..body_len]) catch {
+    const body_len = body_str.lenUtf8(isolate);
+    const response_body = allocator.alloc(u8, body_len) catch {
         return .{ .status = 500, .body = "Out of memory", .content_type = "text/plain" };
     };
+    _ = body_str.writeUtf8(isolate, response_body);
 
     // Get content-type from headers
     var content_type: []const u8 = "text/plain";

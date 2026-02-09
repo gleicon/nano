@@ -154,6 +154,20 @@ pub inline fn retEmptyArray(ctx: CallbackContext) void {
     ctx.info.getReturnValue().set(v8.Value{ .handle = @ptrCast(array(ctx.isolate, 0).handle) });
 }
 
+/// Return a resolved Promise wrapping a value
+pub inline fn retResolvedPromise(ctx: CallbackContext, value: v8.Value) void {
+    const resolver = v8.PromiseResolver.init(ctx.context);
+    _ = resolver.resolve(ctx.context, value);
+    ctx.info.getReturnValue().set(v8.Value{ .handle = @ptrCast(resolver.getPromise().handle) });
+}
+
+/// Return a rejected Promise wrapping an error value
+pub inline fn retRejectedPromise(ctx: CallbackContext, err_value: v8.Value) void {
+    const resolver = v8.PromiseResolver.init(ctx.context);
+    _ = resolver.reject(ctx.context, err_value);
+    ctx.info.getReturnValue().set(v8.Value{ .handle = @ptrCast(resolver.getPromise().handle) });
+}
+
 // ============================================================================
 // Exception Handling - cleaner throw syntax
 // ============================================================================

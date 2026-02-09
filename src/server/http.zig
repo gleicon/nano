@@ -13,6 +13,13 @@ const config_mod = @import("config");
 // Get the actual type from the function return type
 const ArrayBufferAllocator = @TypeOf(v8.createDefaultArrayBufferAllocator());
 
+/// Per-app connection tracking for graceful drain
+const AppDrainState = struct {
+    active_connections: u64 = 0,
+    draining: bool = false,
+    drain_start_ns: i128 = 0,
+};
+
 pub const HttpServer = struct {
     address: std.net.Address,
     server: std.net.Server,
@@ -34,6 +41,8 @@ pub const HttpServer = struct {
     config_watcher: ?ConfigWatcher,
     // Admin API
     admin_enabled: bool,
+    // Per-app connection tracking for graceful shutdown
+    app_drain_state: std.StringHashMap(AppDrainState),
 
     pub fn init(port: u16, allocator: std.mem.Allocator) !HttpServer {
         const address = std.net.Address.initIp4(.{ 0, 0, 0, 0 }, port);
@@ -69,6 +78,7 @@ pub const HttpServer = struct {
             .config_path = null,
             .config_watcher = null,
             .admin_enabled = true,
+            .app_drain_state = std.StringHashMap(AppDrainState).init(allocator),
         };
     }
 
@@ -115,6 +125,9 @@ pub const HttpServer = struct {
             // Need to dupe the hostname since cfg will be freed
             const hostname_key = try self.allocator.dupe(u8, app_cfg.hostname);
             try self.apps.put(hostname_key, app_ptr);
+
+            // Register connection tracking for this app
+            try self.app_drain_state.put(hostname_key, AppDrainState{});
 
             // First app becomes default
             if (self.default_app == null) {
@@ -232,38 +245,90 @@ pub const HttpServer = struct {
             }
         }
 
-        // TODO: Handle changed apps (same hostname, different path) - for now, just track unchanged
-        const unchanged_count = self.apps.count() - added_count;
+        // Detect changed apps (same hostname, different path) — remove and re-add
+        var changed_count: usize = 0;
+        var change_iter = new_hostnames.iterator();
+        while (change_iter.next()) |entry| {
+            if (self.apps.get(entry.key_ptr.*)) |existing_app| {
+                // Compare paths: if different, the app script changed
+                if (!std.mem.eql(u8, existing_app.app_path, entry.value_ptr.*.path)) {
+                    self.removeApp(entry.key_ptr.*);
+                    self.addApp(entry.value_ptr.*) catch |err| {
+                        var err_logger = log.stderr();
+                        err_logger.err("app_reload_failed", .{
+                            .hostname = entry.key_ptr.*,
+                            .@"error" = @errorName(err),
+                        });
+                        continue;
+                    };
+                    changed_count += 1;
+                }
+            }
+        }
+
+        const unchanged_count = self.apps.count() - added_count - changed_count;
 
         logger.info("config_reload_complete", .{
             .added = added_count,
             .removed = removed_count,
+            .changed = changed_count,
             .unchanged = unchanged_count,
         });
     }
 
-    /// Remove an app by hostname
+    /// Remove an app by hostname (drains active connections first)
     fn removeApp(self: *HttpServer, hostname: []const u8) void {
         var logger = log.stdout();
 
-        // Find and remove from HashMap
+        // Mark app as draining to prevent new connections (returns 503)
+        if (self.app_drain_state.getPtr(hostname)) |drain| {
+            drain.draining = true;
+            drain.drain_start_ns = std.time.nanoTimestamp();
+        }
+
+        logger.info("app_drain_start", .{ .hostname = hostname });
+
+        // Wait for active connections to complete (with 30s timeout)
+        const drain_timeout_ns: i128 = 30_000 * 1_000_000;
+        const drain_start = std.time.nanoTimestamp();
+
+        while (true) {
+            if (self.app_drain_state.get(hostname)) |drain| {
+                if (drain.active_connections == 0) {
+                    logger.info("app_drained", .{ .hostname = hostname });
+                    break;
+                }
+                const elapsed = std.time.nanoTimestamp() - drain_start;
+                if (elapsed > drain_timeout_ns) {
+                    var warn_logger = log.stderr();
+                    warn_logger.err("app_drain_timeout", .{
+                        .hostname = hostname,
+                        .active = drain.active_connections,
+                    });
+                    break;
+                }
+            } else {
+                break;
+            }
+            std.Thread.sleep(10_000_000); // 10ms poll
+        }
+
+        // Now safe to remove and deallocate
         if (self.apps.fetchRemove(hostname)) |kv| {
             const app_ptr = kv.value;
 
-            // Free the hostname key (we allocated it)
-            self.allocator.free(kv.key);
-
             // Find in storage and remove
             for (self.app_storage.items, 0..) |*stored_app, i| {
-                // Compare by pointer - app_ptr points into app_storage.items
                 const stored_ptr: *app_module.App = stored_app;
                 if (stored_ptr == app_ptr) {
-                    // Cleanup V8 resources (follows correct order)
                     stored_app.deinit();
                     _ = self.app_storage.swapRemove(i);
                     break;
                 }
             }
+
+            // Clean up drain state (before freeing hostname key)
+            _ = self.app_drain_state.remove(hostname);
 
             // Update default_app if we removed it
             if (self.default_app == app_ptr) {
@@ -272,6 +337,9 @@ pub const HttpServer = struct {
                 else
                     null;
             }
+
+            // Free the hostname key last (after all map lookups are done)
+            self.allocator.free(kv.key);
 
             logger.info("app_removed", .{
                 .hostname = hostname,
@@ -301,6 +369,9 @@ pub const HttpServer = struct {
         // Register hostname -> app mapping
         const hostname_key = try self.allocator.dupe(u8, app_cfg.hostname);
         try self.apps.put(hostname_key, app_ptr);
+
+        // Register connection tracking for this app
+        try self.app_drain_state.put(hostname_key, AppDrainState{});
 
         // First app becomes default if none set
         if (self.default_app == null) {
@@ -340,6 +411,7 @@ pub const HttpServer = struct {
         }
         self.app_storage.deinit(self.allocator);
 
+        self.app_drain_state.deinit();
         self.server.deinit();
         self.event_loop.deinit();
 
@@ -476,6 +548,37 @@ pub const HttpServer = struct {
             target_app = self.default_app;
         }
 
+        // Graceful shutdown: check if target app is draining, count active connections
+        var active_connection_tracked = false;
+        defer {
+            if (active_connection_tracked) {
+                if (host) |hostname| {
+                    if (self.app_drain_state.getPtr(hostname)) |drain| {
+                        drain.active_connections -|= 1;
+                    }
+                }
+            }
+        }
+
+        if (target_app != null) {
+            if (host) |hostname| {
+                if (self.app_drain_state.get(hostname)) |drain| {
+                    if (drain.draining) {
+                        const drain_body = "{\"error\":\"Service draining\",\"retry_after_s\":30}";
+                        try self.sendResponse(conn, 503, "application/json", drain_body);
+                        const latency_ns: u64 = @intCast(std.time.nanoTimestamp() - start_time);
+                        self.metrics.recordRequest(latency_ns, true);
+                        logRequest(request_id, method, path, 503, drain_body.len, @as(f64, @floatFromInt(latency_ns)) / 1_000_000.0);
+                        return;
+                    }
+                }
+                if (self.app_drain_state.getPtr(hostname)) |drain_mut| {
+                    drain_mut.active_connections += 1;
+                    active_connection_tracked = true;
+                }
+            }
+        }
+
         // Handle app request
         var status: u16 = 200;
         var response_body: []const u8 = "Hello from NANO!\n";
@@ -509,26 +612,24 @@ pub const HttpServer = struct {
             }
         }
 
-        // Build response
-        var response_buf: [65536 + 256]u8 = undefined;
-        const response = std.fmt.bufPrint(&response_buf,
+        // Build and send response headers, then body separately (no size cap)
+        var header_buf: [1024]u8 = undefined;
+        const headers = std.fmt.bufPrint(&header_buf,
             "HTTP/1.1 {d} {s}\r\n" ++
             "Content-Type: {s}\r\n" ++
             "Content-Length: {d}\r\n" ++
             "Connection: close\r\n" ++
-            "\r\n" ++
-            "{s}",
+            "\r\n",
             .{
                 status,
                 statusText(status),
                 content_type,
                 response_body.len,
-                response_body,
             },
         ) catch return;
 
-        // Send response
-        _ = try conn.stream.writeAll(response);
+        _ = try conn.stream.writeAll(headers);
+        _ = try conn.stream.writeAll(response_body);
 
         // Calculate latency and record metrics
         const end_time = std.time.nanoTimestamp();
@@ -543,24 +644,23 @@ pub const HttpServer = struct {
 
     fn sendResponse(self: *HttpServer, conn: std.net.Server.Connection, status: u16, content_type: []const u8, body: []const u8) !void {
         _ = self;
-        var response_buf: [65536 + 256]u8 = undefined;
-        const response = std.fmt.bufPrint(&response_buf,
+        var header_buf: [1024]u8 = undefined;
+        const headers = std.fmt.bufPrint(&header_buf,
             "HTTP/1.1 {d} {s}\r\n" ++
                 "Content-Type: {s}\r\n" ++
                 "Content-Length: {d}\r\n" ++
                 "Connection: close\r\n" ++
-                "\r\n" ++
-                "{s}",
+                "\r\n",
             .{
                 status,
                 statusText(status),
                 content_type,
                 body.len,
-                body,
             },
         ) catch return error.ResponseTooLarge;
 
-        try conn.stream.writeAll(response);
+        try conn.stream.writeAll(headers);
+        try conn.stream.writeAll(body);
     }
 
     pub fn stop(self: *HttpServer) void {
@@ -579,6 +679,56 @@ pub const HttpServer = struct {
             .errors = self.metrics.error_count,
             .uptime_s = self.metrics.uptimeSeconds(),
         });
+
+        // Drain active connections before exit (30s timeout)
+        self.initiateGracefulShutdown(30_000);
+    }
+
+    /// Wait for all active connections to complete or timeout
+    fn initiateGracefulShutdown(self: *HttpServer, timeout_ms: u64) void {
+        var logger = log.stdout();
+
+        // Mark all apps as draining
+        var iter = self.app_drain_state.valueIterator();
+        while (iter.next()) |drain| {
+            drain.draining = true;
+            drain.drain_start_ns = std.time.nanoTimestamp();
+        }
+
+        logger.info("shutdown_graceful", .{ .timeout_ms = timeout_ms });
+
+        const start_ns = std.time.nanoTimestamp();
+        const timeout_ns: i128 = @intCast(timeout_ms * 1_000_000);
+        var poll_count: u32 = 0;
+
+        while (true) {
+            var all_drained = true;
+            var check_iter = self.app_drain_state.valueIterator();
+            while (check_iter.next()) |drain| {
+                if (drain.active_connections > 0) {
+                    all_drained = false;
+                    break;
+                }
+            }
+
+            if (all_drained) {
+                logger.info("shutdown_drained", .{ .polls = poll_count });
+                break;
+            }
+
+            const elapsed_ns = std.time.nanoTimestamp() - start_ns;
+            if (elapsed_ns > timeout_ns) {
+                var warn_logger = log.stderr();
+                warn_logger.err("shutdown_timeout_reached", .{
+                    .elapsed_ms = @divTrunc(elapsed_ns, 1_000_000),
+                    .timeout_ms = timeout_ms,
+                });
+                break;
+            }
+
+            std.Thread.sleep(10_000_000); // 10ms poll
+            poll_count += 1;
+        }
     }
 
     /// Process event loop - tick and execute any pending timer callbacks
@@ -586,12 +736,25 @@ pub const HttpServer = struct {
         // Tick the event loop to check for completed timers
         _ = self.event_loop.tick() catch return;
 
-        // Get V8 context from the app
-        const isolate = app.isolate;
-        const context = app.persistent_context.castToContext();
+        // Only enter V8 if there are completed callbacks to process
+        const completed = self.event_loop.getCompletedCallbacks();
+        if (completed.len > 0) {
+            // Must enter isolate + HandleScope since handleRequest already exited
+            var isolate = app.isolate;
+            isolate.enter();
+            defer isolate.exit();
 
-        // Execute any pending timer callbacks
-        timers.executePendingTimers(isolate, context, &self.event_loop);
+            var handle_scope: v8.HandleScope = undefined;
+            handle_scope.init(isolate);
+            defer handle_scope.deinit();
+
+            const context = app.persistent_context.castToContext();
+            context.enter();
+            defer context.exit();
+
+            // Execute any pending timer callbacks
+            timers.executePendingTimers(isolate, context, &self.event_loop);
+        }
 
         // Clean up inactive timers
         self.event_loop.cleanup();

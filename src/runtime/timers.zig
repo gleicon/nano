@@ -158,6 +158,11 @@ pub fn executePendingTimers(isolate: v8.Isolate, context: v8.Context, loop: *Eve
         const persistent_ptr: *v8.Persistent(v8.Function) = @ptrFromInt(timer_info.callback_ptr);
         const callback = persistent_ptr.castToFunction();
 
+        // TryCatch scope to prevent pending exceptions from corrupting V8 state
+        var try_catch: v8.TryCatch = undefined;
+        try_catch.init(isolate);
+        defer try_catch.deinit();
+
         // Call the callback with no arguments
         var args: [0]v8.Value = .{};
         _ = callback.call(context, isolate.initUndefined().toValue(), &args);

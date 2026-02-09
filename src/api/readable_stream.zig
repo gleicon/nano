@@ -219,6 +219,10 @@ fn readableStreamCancel(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c
     // Transition to closed state
     _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_state", js.string(ctx.isolate, "closed"));
 
+    // Resolve pending reads and reader's closedPromise
+    resolvePendingReadsAsDone(ctx.isolate, ctx.context, ctx.this);
+    resolveReaderClosedPromise(ctx.isolate, ctx.context, ctx.this);
+
     // Return resolved promise (for WHATWG compliance)
     const promise_resolver = v8.PromiseResolver.init(ctx.context);
     _ = promise_resolver.resolve(ctx.context, js.undefined_(ctx.isolate).toValue());
@@ -680,26 +684,55 @@ fn controllerEnqueue(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) v
         _ = js.setProp(stream, ctx.context, ctx.isolate, "_state", js.string(ctx.isolate, "errored"));
         _ = js.setProp(stream, ctx.context, ctx.isolate, "_error", error_obj.toValue());
 
-        // TODO: Reject pending reads (requires proper async mechanism)
-        // For MVP, just throw the error
+        // Reject pending reads and reader's closedPromise
+        rejectPendingReads(ctx.isolate, ctx.context, stream, error_obj.toValue());
+        rejectReaderClosedPromise(ctx.isolate, ctx.context, stream, error_obj.toValue());
         js.throw(ctx.isolate, error_msg_buf);
         return;
     }
 
-    // Add to queue
-    const queue_val = js.getProp(stream, ctx.context, ctx.isolate, "_queue") catch {
-        js.throw(ctx.isolate, "Internal error: cannot read queue");
-        return;
+    // Check for pending reads - deliver directly if a reader is waiting
+    const delivered = blk: {
+        const pr_val = js.getProp(stream, ctx.context, ctx.isolate, "_pendingReads") catch break :blk false;
+        if (!pr_val.isArray()) break :blk false;
+        const pending = js.asArray(pr_val);
+        const pending_len = pending.length();
+        if (pending_len == 0) break :blk false;
+
+        const first_resolver_val = js.getIndex(pending.castTo(v8.Object), ctx.context, 0) catch break :blk false;
+
+        // Shift pending reads array
+        const new_pending = js.array(ctx.isolate, pending_len - 1);
+        var j: u32 = 1;
+        while (j < pending_len) : (j += 1) {
+            const elem = js.getIndex(pending.castTo(v8.Object), ctx.context, j) catch continue;
+            _ = js.setIndex(new_pending.castTo(v8.Object), ctx.context, j - 1, elem);
+        }
+        _ = js.setProp(stream, ctx.context, ctx.isolate, "_pendingReads", new_pending);
+
+        // Resolve with {value: chunk, done: false}
+        const result = js.object(ctx.isolate, ctx.context);
+        _ = js.setProp(result, ctx.context, ctx.isolate, "value", chunk);
+        _ = js.setProp(result, ctx.context, ctx.isolate, "done", v8.Value{ .handle = js.boolean(ctx.isolate, false).handle });
+
+        const read_resolver = v8.PromiseResolver{ .handle = @ptrCast(first_resolver_val.handle) };
+        _ = read_resolver.resolve(ctx.context, result.toValue());
+        break :blk true;
     };
-    const queue = js.asArray(queue_val);
-    const queue_len = queue.length();
-    _ = js.setIndex(queue.castTo(v8.Object), ctx.context, queue_len, chunk);
 
-    // Update queue byte size
-    _ = js.setProp(stream, ctx.context, ctx.isolate, "_queueByteSize", js.number(ctx.isolate, new_size));
+    if (!delivered) {
+        // No pending reads - add to queue
+        const queue_val = js.getProp(stream, ctx.context, ctx.isolate, "_queue") catch {
+            js.throw(ctx.isolate, "Internal error: cannot read queue");
+            return;
+        };
+        const queue = js.asArray(queue_val);
+        const queue_len = queue.length();
+        _ = js.setIndex(queue.castTo(v8.Object), ctx.context, queue_len, chunk);
 
-    // TODO: Process pending reads (requires proper async mechanism)
-    // For MVP, data is just added to queue and read() will find it synchronously
+        // Update queue byte size
+        _ = js.setProp(stream, ctx.context, ctx.isolate, "_queueByteSize", js.number(ctx.isolate, new_size));
+    }
 
     js.retUndefined(ctx);
 }
@@ -732,7 +765,10 @@ fn controllerClose(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
     if (queue.length() == 0) {
         _ = js.setProp(stream, ctx.context, ctx.isolate, "_state", js.string(ctx.isolate, "closed"));
 
-        // TODO: Resolve pending reads with {done: true} (requires proper async mechanism)
+        // Resolve all pending reads with {done: true}
+        resolvePendingReadsAsDone(ctx.isolate, ctx.context, stream);
+        // Resolve reader's closedPromise
+        resolveReaderClosedPromise(ctx.isolate, ctx.context, stream);
     }
 
     js.retUndefined(ctx);
@@ -759,13 +795,10 @@ fn controllerError(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
     _ = js.setProp(stream, ctx.context, ctx.isolate, "_state", js.string(ctx.isolate, "errored"));
     _ = js.setProp(stream, ctx.context, ctx.isolate, "_error", error_val);
 
-    // Reject all pending reads
-    const pending_reads_val = js.getProp(stream, ctx.context, ctx.isolate, "_pendingReads") catch {
-        js.retUndefined(ctx);
-        return;
-    };
-    // TODO: Reject pending reads (requires proper async mechanism)
-    _ = pending_reads_val; // Suppress unused variable warning
+    // Reject all pending reads with error
+    rejectPendingReads(ctx.isolate, ctx.context, stream, error_val);
+    // Reject reader's closedPromise
+    rejectReaderClosedPromise(ctx.isolate, ctx.context, stream, error_val);
 
     // Clear queue (buffered data is lost per WHATWG spec)
     _ = js.setProp(stream, ctx.context, ctx.isolate, "_queue", js.array(ctx.isolate, 0));
@@ -813,6 +846,8 @@ fn readerConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) v
     const closed_resolver = v8.PromiseResolver.init(ctx.context);
     const closed_promise = closed_resolver.getPromise();
     _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_closedPromise", v8.Value{ .handle = @ptrCast(closed_promise.handle) });
+    // Store resolver so controllerClose/controllerError can resolve/reject it
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_closedResolver", v8.Value{ .handle = @ptrCast(closed_resolver.handle) });
 }
 
 fn readerClosedGetter(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
@@ -916,9 +951,8 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         const close_requested = if (close_requested_val.isBoolean()) close_requested_val.toBool(ctx.isolate) else false;
 
         if (close_requested and new_queue.length() == 0) {
-            // Close the stream now
             _ = js.setProp(stream, ctx.context, ctx.isolate, "_state", js.string(ctx.isolate, "closed"));
-            // Note: closed promise resolution deferred to full WHATWG implementation
+            resolveReaderClosedPromise(ctx.isolate, ctx.context, stream);
         }
 
         // Return {value: chunk, done: false}
@@ -1012,6 +1046,7 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
 
                 if (close_req and new_queue.length() == 0) {
                     _ = js.setProp(stream, ctx.context, ctx.isolate, "_state", js.string(ctx.isolate, "closed"));
+                    resolveReaderClosedPromise(ctx.isolate, ctx.context, stream);
                 }
 
                 // Return {value: chunk, done: false}
@@ -1049,10 +1084,19 @@ fn readerRead(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         }
     }
 
-    // No pull callback or pull didn't enqueue data - reject
+    // No data available yet - store a pending read Promise that will be
+    // resolved when controllerEnqueue/controllerClose/controllerError is called
     const resolver = v8.PromiseResolver.init(ctx.context);
-    const error_msg = js.string(ctx.isolate, "No data available - pull callback should enqueue data");
-    _ = resolver.reject(ctx.context, error_msg.toValue());
+    const pending_val = js.getProp(stream, ctx.context, ctx.isolate, "_pendingReads") catch {
+        _ = resolver.reject(ctx.context, js.string(ctx.isolate, "Internal error: cannot access pending reads").toValue());
+        js.ret(ctx, resolver.getPromise());
+        return;
+    };
+    if (pending_val.isArray()) {
+        const pending = js.asArray(pending_val);
+        const pending_len = pending.length();
+        _ = js.setIndex(pending.castTo(v8.Object), ctx.context, pending_len, v8.Value{ .handle = @ptrCast(resolver.handle) });
+    }
     js.ret(ctx, resolver.getPromise());
 }
 
@@ -1117,6 +1161,68 @@ fn readerReleaseLock(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) v
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// Resolve all pending reads with {value: undefined, done: true}
+fn resolvePendingReadsAsDone(isolate: v8.Isolate, context: v8.Context, stream: v8.Object) void {
+    const pending_val = js.getProp(stream, context, isolate, "_pendingReads") catch return;
+    if (!pending_val.isArray()) return;
+    const pending = js.asArray(pending_val);
+    const pending_len = pending.length();
+
+    var i: u32 = 0;
+    while (i < pending_len) : (i += 1) {
+        const resolver_val = js.getIndex(pending.castTo(v8.Object), context, i) catch continue;
+        const resolver = v8.PromiseResolver{ .handle = @ptrCast(resolver_val.handle) };
+
+        const result = js.object(isolate, context);
+        _ = js.setProp(result, context, isolate, "value", js.undefined_(isolate).toValue());
+        _ = js.setProp(result, context, isolate, "done", v8.Value{ .handle = js.boolean(isolate, true).handle });
+        _ = resolver.resolve(context, result.toValue());
+    }
+
+    // Clear pending reads
+    _ = js.setProp(stream, context, isolate, "_pendingReads", js.array(isolate, 0));
+}
+
+/// Reject all pending reads with an error value
+fn rejectPendingReads(isolate: v8.Isolate, context: v8.Context, stream: v8.Object, error_val: v8.Value) void {
+    const pending_val = js.getProp(stream, context, isolate, "_pendingReads") catch return;
+    if (!pending_val.isArray()) return;
+    const pending = js.asArray(pending_val);
+    const pending_len = pending.length();
+
+    var i: u32 = 0;
+    while (i < pending_len) : (i += 1) {
+        const resolver_val = js.getIndex(pending.castTo(v8.Object), context, i) catch continue;
+        const resolver = v8.PromiseResolver{ .handle = @ptrCast(resolver_val.handle) };
+        _ = resolver.reject(context, error_val);
+    }
+
+    // Clear pending reads
+    _ = js.setProp(stream, context, isolate, "_pendingReads", js.array(isolate, 0));
+}
+
+/// Resolve the reader's closedPromise (called when stream transitions to closed)
+fn resolveReaderClosedPromise(isolate: v8.Isolate, context: v8.Context, stream: v8.Object) void {
+    const reader_val = js.getProp(stream, context, isolate, "_reader") catch return;
+    if (reader_val.isNull()) return;
+    const reader = js.asObject(reader_val);
+    const resolver_val = js.getProp(reader, context, isolate, "_closedResolver") catch return;
+    if (resolver_val.isNull() or resolver_val.isUndefined()) return;
+    const resolver = v8.PromiseResolver{ .handle = @ptrCast(resolver_val.handle) };
+    _ = resolver.resolve(context, js.undefined_(isolate).toValue());
+}
+
+/// Reject the reader's closedPromise (called when stream transitions to errored)
+fn rejectReaderClosedPromise(isolate: v8.Isolate, context: v8.Context, stream: v8.Object, error_val: v8.Value) void {
+    const reader_val = js.getProp(stream, context, isolate, "_reader") catch return;
+    if (reader_val.isNull()) return;
+    const reader = js.asObject(reader_val);
+    const resolver_val = js.getProp(reader, context, isolate, "_closedResolver") catch return;
+    if (resolver_val.isNull() or resolver_val.isUndefined()) return;
+    const resolver = v8.PromiseResolver{ .handle = @ptrCast(resolver_val.handle) };
+    _ = resolver.reject(context, error_val);
+}
 
 fn calculateChunkSize(ctx: js.CallbackContext, chunk: v8.Value) usize {
     if (chunk.isString()) {

@@ -639,6 +639,20 @@ fn processWriteQueue(isolate: v8.Isolate, context: v8.Context, stream: v8.Object
     // Process next item if queue not empty
     if (new_queue.length() > 0) {
         processWriteQueue(isolate, context, stream);
+    } else {
+        // Queue is empty - check if close was requested while writes were pending
+        const close_requested_val = js.getProp(stream, context, isolate, "_closeRequested") catch null;
+        if (close_requested_val) |crv| {
+            if (crv.isBoolean() and crv.isTrue()) {
+                const close_resolver_val = js.getProp(stream, context, isolate, "_closeResolver") catch null;
+                if (close_resolver_val) |csv| {
+                    if (csv.isObject()) {
+                        const close_resolver = v8.PromiseResolver{ .handle = @ptrCast(csv.handle) };
+                        finishClose(isolate, context, stream, close_resolver);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -771,8 +785,9 @@ fn writerAbort(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         js.ret(ctx, resolver.getPromise());
     }
 
-    // Release lock
+    // Release lock on both sides
     _ = js.setProp(stream, ctx.context, ctx.isolate, "_writer", js.null_(ctx.isolate));
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_stream", js.null_(ctx.isolate).toValue());
 }
 
 fn writerReleaseLock(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
@@ -788,6 +803,7 @@ fn writerReleaseLock(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) v
 
     const stream = js.asObject(stream_val);
 
-    // Release lock
+    // Release lock on both sides
     _ = js.setProp(stream, ctx.context, ctx.isolate, "_writer", js.null_(ctx.isolate));
+    _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_stream", js.null_(ctx.isolate).toValue());
 }

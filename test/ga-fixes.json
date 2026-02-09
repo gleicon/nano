@@ -1,0 +1,10 @@
+{
+  "port": 8090,
+  "apps": [
+    {
+      "name": "ga-fixes-test",
+      "hostname": "localhost",
+      "path": "test/apps/ga-fixes-test"
+    }
+  ]
+}

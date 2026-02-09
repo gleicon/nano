@@ -75,7 +75,6 @@ pub const ConfigWatcher = struct {
         completion: *xev.Completion,
         result: xev.Timer.RunError!void,
     ) xev.CallbackAction {
-        _ = loop;
         _ = completion;
         _ = result catch return .disarm;
 
@@ -87,14 +86,15 @@ pub const ConfigWatcher = struct {
 
         // Try to stat the config file
         const file = std.fs.cwd().openFile(watcher.config_path, .{}) catch {
-            // File temporarily inaccessible (editor save in progress), retry next poll
-            return .rearm;
+            // File temporarily inaccessible, re-schedule and retry
+            watcher.reschedule(loop);
+            return .disarm;
         };
         defer file.close();
 
         const stat = file.stat() catch {
-            // Stat failed, retry next poll
-            return .rearm;
+            watcher.reschedule(loop);
+            return .disarm;
         };
 
         // Check if mtime changed
@@ -111,7 +111,15 @@ pub const ConfigWatcher = struct {
             }
         }
 
-        return .rearm; // Continue polling
+        // Re-schedule with a fresh absolute time (don't use .rearm which
+        // re-inserts with the old past time, causing run(.no_wait) to spin)
+        watcher.reschedule(loop);
+        return .disarm;
+    }
+
+    /// Re-schedule the timer with a fresh delay from now
+    fn reschedule(self: *ConfigWatcher, loop: *xev.Loop) void {
+        self.timer.run(loop, &self.completion, POLL_INTERVAL_MS, ConfigWatcher, self, onTimer);
     }
 };
 
@@ -253,7 +261,6 @@ pub const EventLoop = struct {
         completion: *xev.Completion,
         result: xev.Timer.RunError!void,
     ) xev.CallbackAction {
-        _ = loop;
         _ = completion;
 
         const timer = timer_ptr orelse return .disarm;
@@ -276,8 +283,10 @@ pub const EventLoop = struct {
         }) catch {};
 
         if (timer.interval) {
-            // Rearm for setInterval
-            return .rearm;
+            // Re-schedule with a fresh absolute time for setInterval
+            // (don't use .rearm which re-inserts with the old past time)
+            timer.timer.run(loop, &timer.completion, timer.delay_ms, PendingTimer, timer, timerFired);
+            return .disarm;
         } else {
             // Disarm for setTimeout
             timer.active = false;

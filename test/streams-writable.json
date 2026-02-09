@@ -1,0 +1,11 @@
+{
+  "port": 8080,
+  "apps": [
+    {
+      "name": "writable-test",
+      "hostname": "writable.local",
+      "path": "test/apps/writable-test",
+      "max_buffer_size_mb": 1
+    }
+  ]
+}
