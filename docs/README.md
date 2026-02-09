@@ -1,49 +1,102 @@
-# Starlight Starter Kit: Basics
+# NANO Documentation
 
-[![Built with Starlight](https://astro.badg.es/v2/built-with-starlight/tiny.svg)](https://starlight.astro.build)
+Built with [Astro](https://astro.build) + [Starlight](https://starlight.astro.build).
 
-```
-npm create astro@latest -- --template starlight
-```
-
-> 🧑‍🚀 **Seasoned astronaut?** Delete this file. Have fun!
-
-## 🚀 Project Structure
-
-Inside of your Astro + Starlight project, you'll see the following folders and files:
+## Project Structure
 
 ```
-.
-├── public/
+docs/
+├── public/              # Static assets (favicons, images)
 ├── src/
-│   ├── assets/
-│   ├── content/
-│   │   └── docs/
-│   └── content.config.ts
-├── astro.config.mjs
+│   └── content/docs/    # Documentation pages (.md)
+│       ├── getting-started/
+│       ├── config/
+│       ├── api/
+│       ├── wintercg/
+│       └── deployment/
+├── astro.config.mjs     # Site configuration
 ├── package.json
 └── tsconfig.json
 ```
 
-Starlight looks for `.md` or `.mdx` files in the `src/content/docs/` directory. Each file is exposed as a route based on its file name.
+Each `.md` file in `src/content/docs/` becomes a page. Sidebar order is controlled via frontmatter `sidebar.order`.
 
-Images can be added to `src/assets/` and embedded in Markdown with a relative link.
+## Development
 
-Static assets, like favicons, can be placed in the `public/` directory.
+```bash
+cd docs
+npm install
+npm run dev
+```
 
-## 🧞 Commands
+Open http://localhost:4321 to preview.
 
-All commands are run from the root of the project, from a terminal:
+## Building for Production
 
-| Command                   | Action                                           |
-| :------------------------ | :----------------------------------------------- |
-| `npm install`             | Installs dependencies                            |
-| `npm run dev`             | Starts local dev server at `localhost:4321`      |
-| `npm run build`           | Build your production site to `./dist/`          |
-| `npm run preview`         | Preview your build locally, before deploying     |
-| `npm run astro ...`       | Run CLI commands like `astro add`, `astro check` |
-| `npm run astro -- --help` | Get help using the Astro CLI                     |
+```bash
+npm run build
+```
 
-## 👀 Want to learn more?
+Static output goes to `docs/dist/`. Serve it with any static file server, reverse proxy, or deploy to GitHub Pages / Netlify / Vercel.
 
-Check out [Starlight’s docs](https://starlight.astro.build/), read [the Astro documentation](https://docs.astro.build), or jump into the [Astro Discord server](https://astro.build/chat).
+## Serving with NANO
+
+You can use NANO itself to serve the documentation site. Create a wrapper app:
+
+**docs-app/index.js:**
+
+```javascript
+export default {
+  async fetch(request) {
+    const url = new URL(request.url());
+    return new Response(`Documentation site — serve dist/ with a static server`, {
+      headers: { "Content-Type": "text/plain" }
+    });
+  }
+};
+```
+
+For production, build the static site and serve `dist/` behind Nginx or Caddy. See the [Deployment guide](src/content/docs/deployment/index.md).
+
+## Commands
+
+| Command           | Action                                      |
+| ----------------- | ------------------------------------------- |
+| `npm install`     | Install dependencies                        |
+| `npm run dev`     | Start dev server at `localhost:4321`        |
+| `npm run build`   | Build static site to `./dist/`              |
+| `npm run preview` | Preview build locally before deploying      |
+
+## Deploying
+
+### GitHub Pages
+
+```bash
+npm run build
+# Copy dist/ contents to your gh-pages branch
+```
+
+### Nginx
+
+```nginx
+server {
+    listen 80;
+    server_name docs.example.com;
+    root /var/www/nano-docs/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ $uri.html =404;
+    }
+}
+```
+
+### Caddy
+
+```
+docs.example.com {
+    root * /var/www/nano-docs/dist
+    file_server
+    try_files {path} {path}/ {path}.html
+}
+```

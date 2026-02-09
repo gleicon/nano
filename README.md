@@ -2,47 +2,47 @@
 
 A lightweight JavaScript runtime for serverless workloads, built with Zig and V8.
 
-NANO is designed to run Cloudflare Workers-compatible JavaScript code with minimal overhead and fast startup times.
+NANO hosts multiple isolated JavaScript applications in a single process using V8 isolates. Think of it like a browser with tabs — each tab is an isolated app sharing one process. It runs Cloudflare Workers-compatible code with minimal overhead.
 
 ## Features
 
-- **V8 JavaScript Engine** - Full ES2023+ support via V8
-- **Cloudflare Workers Compatible** - Run Workers code with familiar APIs
-- **Async/Await Support** - Native Promise handling in request handlers
-- **Event Loop** - libxev-based async runtime for timers and I/O
-- **Production Ready** - Structured logging, metrics, graceful shutdown
+- **V8 JavaScript Engine** — Full ES2023+ support
+- **Cloudflare Workers Compatible** — Run Workers code with familiar APIs
+- **Multi-App Hosting** — Multiple isolated apps on a single port via virtual host routing
+- **Streams API** — WinterCG-compliant ReadableStream, WritableStream, TransformStream
+- **Async/Await** — Native Promise handling with libxev event loop
+- **Hot Reload** — Config file watcher for zero-downtime updates
+- **Graceful Shutdown** — Connection draining on SIGTERM/SIGINT
+- **Production Ready** — Structured logging, metrics, per-app resource limits
 
 ## Quick Start
 
 ### Prerequisites
 
-- Zig 0.15.x
-- macOS, Linux, or Windows (with WSL)
+- Zig 0.15.x — [download](https://ziglang.org/download/)
+- macOS or Linux (Windows via WSL)
 
-### Building
+### Build
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-org/nano.git
+git clone https://github.com/gleicon/nano.git
 cd nano
-
-# Build
 zig build
-
-# The binary is at zig-out/bin/nano
 ```
 
-### Running
+The binary is at `zig-out/bin/nano`.
+
+### Run
 
 ```bash
 # Start REPL
 ./zig-out/bin/nano
 
-# Run a script
-./zig-out/bin/nano run script.js
-
-# Start HTTP server with an app
+# Run a single app
 ./zig-out/bin/nano serve --port 3000 --app ./my-app
+
+# Run multi-app with config
+./zig-out/bin/nano serve --config config.json
 ```
 
 ### Example App
@@ -51,220 +51,229 @@ Create `my-app/index.js`:
 
 ```javascript
 export default {
-    async fetch(request) {
-        const url = new URL(request.url());
+  async fetch(request, env) {
+    const url = new URL(request.url());
 
-        if (url.pathname === "/api/hello") {
-            return Response.json({ message: "Hello, World!" });
-        }
-
-        if (url.pathname === "/api/proxy") {
-            const response = await fetch("https://api.example.com/data");
-            return new Response(response.text(), {
-                headers: { "Content-Type": "application/json" }
-            });
-        }
-
-        return new Response("Not Found", { status: 404 });
+    if (url.pathname === "/api/hello") {
+      return Response.json({
+        message: "Hello from NANO!",
+        app: env.APP_NAME
+      });
     }
+
+    return new Response("Not Found", { status: 404 });
+  }
 };
 ```
 
-Run it:
-
 ```bash
 ./zig-out/bin/nano serve --port 3000 --app ./my-app
+curl http://localhost:3000/api/hello
+```
+
+### Multi-App Config
+
+Create `config.json`:
+
+```json
+{
+  "port": 3000,
+  "apps": [
+    {
+      "name": "api",
+      "hostname": "api.example.com",
+      "path": "./apps/api",
+      "env": { "DB_URL": "postgres://..." }
+    },
+    {
+      "name": "web",
+      "hostname": "www.example.com",
+      "path": "./apps/web"
+    }
+  ]
+}
+```
+
+```bash
+./zig-out/bin/nano serve --config config.json
 ```
 
 ## API Reference
 
 ### Global APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| `console.log/warn/error/info/debug` | Full | Standard console output |
-| `setTimeout(fn, ms)` | Full | One-time delayed execution |
-| `setInterval(fn, ms)` | Full | Repeating execution |
-| `clearTimeout(id)` | Full | Cancel timeout |
-| `clearInterval(id)` | Full | Cancel interval |
-| `fetch(url, options)` | Full | HTTP client, returns Promise |
+| API                                | Status | Notes                            |
+| ---------------------------------- | ------ | -------------------------------- |
+| `console.log/warn/error/info/debug`| Full   | JSON.stringify for objects       |
+| `setTimeout(fn, ms)`              | Full   | Delayed execution via event loop |
+| `setInterval(fn, ms)`             | Full   | Repeating execution              |
+| `clearTimeout(id)`                | Full   | Cancel timeout                   |
+| `clearInterval(id)`               | Full   | Cancel interval                  |
+| `fetch(url, options)`             | Full   | HTTP client, returns Promise     |
 
 ### Web APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| `URL` | Full | URL parsing and manipulation |
-| `URLSearchParams` | Full | Query string handling |
-| `TextEncoder` | Full | UTF-8 encoding |
-| `TextDecoder` | Full | UTF-8 encoding, accepts string/ArrayBuffer/TypedArray |
-| `Headers` | Full | get/set/has/delete/entries/keys/values |
-| `Request` | Full | HTTP request representation |
-| `Response` | Full | HTTP response with static methods |
-| `crypto.randomUUID()` | Full | UUID v4 generation |
-| `crypto.getRandomValues()` | Full | Cryptographic random bytes |
-| `atob/btoa` | Full | Base64 encoding/decoding |
+| API                       | Status  | Notes                                   |
+| ------------------------- | ------- | --------------------------------------- |
+| `URL`                     | Full    | Parsing and manipulation                |
+| `URLSearchParams`         | Full    | Query string handling                   |
+| `TextEncoder`             | Full    | UTF-8 encoding                          |
+| `TextDecoder`             | Full    | UTF-8 decoding, ArrayBuffer input       |
+| `Headers`                 | Full    | get/set/has/delete/append/entries       |
+| `Request`                 | Full    | HTTP request representation             |
+| `Response`                | Full    | HTTP response with static methods       |
+| `Blob`                    | Full    | Binary data (string + ArrayBuffer)      |
+| `File`                    | Full    | Extends Blob with name/lastModified     |
+| `AbortController`         | Full    | Request cancellation                    |
+| `AbortSignal.timeout()`   | Full    | Timeout-based abort                     |
+| `crypto.randomUUID()`     | Full    | UUID v4 generation                      |
+| `crypto.getRandomValues()`| Full    | Cryptographic random bytes              |
+| `crypto.subtle.digest()`  | Full    | SHA-256/384/512                         |
+| `crypto.subtle.sign()`    | Partial | HMAC only                               |
+| `atob/btoa`               | Full    | Base64 encoding/decoding                |
+
+### Streams APIs
+
+| API                  | Status | Notes                              |
+| -------------------- | ------ | ---------------------------------- |
+| `ReadableStream`     | Full   | Controller, reader, async iterator |
+| `WritableStream`     | Full   | Controller, writer, backpressure   |
+| `TransformStream`    | Full   | Transform with pipe operations     |
+| `TextEncoderStream`  | Full   | String to UTF-8 stream             |
+| `TextDecoderStream`  | Full   | UTF-8 to string stream             |
+| `Response.body`      | Full   | Streaming response bodies          |
 
 ### Request Handler
 
-Handlers can be sync or async:
-
 ```javascript
-// Sync handler
 export default {
-    fetch(request) {
-        return new Response("Hello!");
-    }
+  async fetch(request, env) {
+    // request.url()      — Full URL string
+    // request.method()   — HTTP method
+    // request.headers()  — Headers object
+    // request.text()     — Body as string
+    // request.json()     — Body parsed as JSON
+    // env.MY_VAR         — Per-app environment variable
+
+    return new Response("OK");
+  }
 };
-
-// Async handler
-export default {
-    async fetch(request) {
-        const data = await fetch("https://api.example.com/data");
-        return new Response(data.text());
-    }
-};
-```
-
-### Request Object
-
-```javascript
-request.url()      // Full URL string
-request.method()   // HTTP method
-request.headers()  // Headers object
-request.text()     // Body as string
-request.json()     // Body parsed as JSON
-```
-
-### Response Object
-
-```javascript
-// Constructor
-new Response(body, { status: 200, headers: { ... } })
-
-// Static methods
-Response.json(data)           // JSON response with Content-Type
-Response.redirect(url, 302)   // Redirect response
-
-// Instance methods
-response.status()      // Status code
-response.ok()          // true if 200-299
-response.statusText()  // Status text
-response.headers()     // Response headers
-response.text()        // Body as string
-response.json()        // Body parsed as JSON
 ```
 
 ## Built-in Endpoints
 
-| Path | Description |
-|------|-------------|
-| `/health` or `/healthz` | Health check, returns `{"status":"ok"}` |
-| `/metrics` | Prometheus-format metrics |
+| Path                     | Description                        |
+| ------------------------ | ---------------------------------- |
+| `/health` or `/healthz`  | Returns `{"status":"ok"}`         |
+| `/metrics`               | Prometheus-format metrics          |
+
+## Admin API
+
+| Method | Path              | Description               |
+| ------ | ----------------- | ------------------------- |
+| GET    | `/admin/apps`     | List loaded apps          |
+| POST   | `/admin/apps`     | Add app at runtime        |
+| DELETE | `/admin/apps/:id` | Remove app (with drain)   |
+| POST   | `/admin/reload`   | Reload config from disk   |
 
 ## Configuration
 
+### CLI Options
+
+```
+nano serve [options]
+  --port, -p <port>      Server port (default: 3000)
+  --app, -a <path>       Path to app directory (single-app)
+  --config, -c <path>    Path to config.json (multi-app)
+  --help, -h             Show help
+
+nano run <script>        Run a JavaScript file
+nano                     Start REPL
+```
+
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NANO_PORT` | 3000 | Server port |
-| `NANO_LOG_FORMAT` | json | `json`, `text`, or `apache` |
-
-### Command Line
-
-```bash
-nano serve [options]
-  --port, -p <port>    Server port (default: 3000)
-  --app, -a <path>     Path to app directory
-  --help, -h           Show help
-
-nano run <script>      Run a JavaScript file
-
-nano                   Start REPL
-```
+| Variable          | Default | Description              |
+| ----------------- | ------- | ------------------------ |
+| `NANO_PORT`       | 3000    | Server port              |
+| `NANO_LOG_FORMAT` | json    | `json`, `text`, `apache` |
 
 ## Known Limitations
 
-### Not Yet Implemented
+| ID   | Description                | Severity | Target |
+| ---- | -------------------------- | -------- | ------ |
+| B-01 | Stack buffer limits (64KB) | High     | v1.3   |
+| B-02 | Synchronous fetch          | High     | v1.3   |
+| B-03 | WritableStream sync sinks  | Medium   | v1.3   |
+| B-04 | crypto.subtle HMAC only    | Medium   | v1.3   |
+| B-05 | tee() data loss            | Medium   | v1.3   |
+| B-06 | Missing WinterCG APIs      | Low      | v1.3   |
+| B-07 | Single-threaded            | Low      | v1.4+  |
+| B-08 | URL read-only properties   | Low      | v1.3   |
 
-- WebSocket API
-- Streams API (ReadableStream, WritableStream)
-- Service Worker lifecycle events
-- KV/Durable Objects (Cloudflare-specific)
+See [docs/src/content/docs/api/limitations.md](docs/src/content/docs/api/limitations.md) for details and workarounds.
 
-### Partial Implementations
-
-- **Headers.entries()**: Returns array, not iterator (works with for-of loops)
-- **Crypto**: SHA-1/256/384/512 digests and HMAC sign/verify; no AES/ECDH
-
-### Behavior Differences
-
-- `request.url()` and `request.method()` are methods, not properties (Workers uses properties)
-- Promise timeout is iteration-based, not time-based
-
-## Metrics
-
-NANO exposes Prometheus-format metrics at `/metrics`:
-
-```
-# HELP nano_requests_total Total HTTP requests
-# TYPE nano_requests_total counter
-nano_requests_total 1234
-
-# HELP nano_errors_total Total error responses
-# TYPE nano_errors_total counter
-nano_errors_total 5
-
-# HELP nano_latency_seconds_avg Average request latency
-# TYPE nano_latency_seconds_avg gauge
-nano_latency_seconds_avg 0.0123
-
-# HELP nano_uptime_seconds Server uptime
-# TYPE nano_uptime_seconds counter
-nano_uptime_seconds 3600
-```
-
-## Development
-
-### Project Structure
+## Project Structure
 
 ```
 nano/
 ├── src/
-│   ├── main.zig           # CLI entry point
-│   ├── api/               # JavaScript API implementations
+│   ├── main.zig              # CLI entry point
+│   ├── api/                   # JavaScript API implementations
 │   │   ├── console.zig
 │   │   ├── crypto.zig
 │   │   ├── encoding.zig
 │   │   ├── fetch.zig
 │   │   ├── headers.zig
+│   │   ├── readable_stream.zig
+│   │   ├── writable_stream.zig
+│   │   ├── transform_stream.zig
 │   │   ├── request.zig
 │   │   └── url.zig
-│   ├── engine/            # V8 integration
+│   ├── engine/                # V8 integration
 │   │   ├── script.zig
 │   │   └── error.zig
-│   ├── runtime/           # Async runtime
+│   ├── runtime/               # Async runtime
 │   │   ├── event_loop.zig
 │   │   └── timers.zig
-│   └── server/            # HTTP server
+│   └── server/                # HTTP server
 │       ├── http.zig
 │       ├── app.zig
 │       └── metrics.zig
-├── examples/              # Example apps
-├── test/                  # Test fixtures
-└── build.zig              # Build configuration
+├── docs/                      # Astro + Starlight documentation site
+├── test/                      # Test apps and fixtures
+└── build.zig                  # Build configuration
 ```
 
-### Running Tests
+## Documentation
+
+Full documentation is in `docs/`. To build and preview:
 
 ```bash
+cd docs
+npm install
+npm run dev
+```
+
+Topics covered: getting started, configuration, API reference, WinterCG compliance, deployment guides.
+
+## Development
+
+```bash
+# Build
+zig build
+
+# Run tests
 zig build test
+
+# Clean rebuild (if you see stale behavior)
+rm -rf .zig-cache zig-out && zig build
 ```
 
 ### Dependencies
 
-- [zig-v8](https://github.com/nicetytony/zig-v8-fork) - V8 bindings for Zig
-- [libxev](https://github.com/mitchellh/libxev) - Cross-platform event loop
+- [zig-v8](https://github.com/nickelca/v8-zig) — V8 bindings for Zig
+- [libxev](https://github.com/mitchellh/libxev) — Cross-platform event loop
 
 ## License
 

@@ -16,129 +16,141 @@ This page provides a detailed breakdown of NANO's compliance with WinterCG (Web-
 
 ## HTTP and Networking APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **Request** | ✅ | Properties accessed as methods: `url()`, `method()`, `headers()` |
-| **Response** | ✅ | Properties are getters. Static methods `Response.json()`, `Response.redirect()` supported |
-| **Headers** | ✅ | Full WHATWG spec compliance. `append()` uses comma-separated format |
-| **fetch()** | ⚠️ | Fully functional but synchronous (blocks event loop). See [B-02 limitation](/api/limitations#b-02-synchronous-fetch) |
-| **URL** | ⚠️ | Fully functional but read-only properties. See [B-08 limitation](/api/limitations#b-08-url-read-only) |
-| **URLSearchParams** | 🔨 | Planned for v1.3 |
+| API                | Status | Notes                                         |
+| ------------------ | ------ | --------------------------------------------- |
+| **Request**        | ✅     | Properties via methods: `url()`, `method()`   |
+| **Response**       | ✅     | Getter properties. `json()`, `redirect()`     |
+| **Headers**        | ✅     | Full WHATWG spec. `append()` comma-separated   |
+| **fetch()**        | ⚠️     | Synchronous (blocks event loop). See [B-02]   |
+| **URL**            | ⚠️     | Read-only properties. See [B-08]              |
+| **URLSearchParams**| 🔨     | Planned for v1.3                              |
 
 ## Streams APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **ReadableStream** | ⚠️ | Implemented but `tee()` has data loss bug. See [B-05 limitation](/api/limitations#b-05-tee-data-loss) |
-| **WritableStream** | ⚠️ | Implemented but sinks must be synchronous. See [B-03 limitation](/api/limitations#b-03-writable-async) |
-| **TransformStream** | ✅ | Fully functional |
-| **ReadableStreamDefaultReader** | ✅ | Fully functional |
-| **WritableStreamDefaultWriter** | ✅ | Fully functional |
-| **ReadableStreamBYOBReader** | ❌ | Not planned (low priority) |
+| API                             | Status | Notes                                  |
+| ------------------------------- | ------ | -------------------------------------- |
+| **ReadableStream**              | ⚠️     | `tee()` has data loss. See [B-05]      |
+| **WritableStream**              | ⚠️     | Sync sinks only. See [B-03]            |
+| **TransformStream**             | ✅     | Fully functional                       |
+| **ReadableStreamDefaultReader** | ✅     | Fully functional                       |
+| **WritableStreamDefaultWriter** | ✅     | Fully functional                       |
+| **ReadableStreamBYOBReader**    | ❌     | Not planned (low priority)             |
 
 ## Binary Data APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **Blob** | ⚠️ | Implemented with 64KB constructor limit. See [B-01 limitation](/api/limitations#b-01-buffer-limits) |
-| **File** | ⚠️ | Implemented with same 64KB limit as Blob |
-| **ArrayBuffer** | ✅ | Fully functional |
-| **TypedArray** (Uint8Array, etc.) | ✅ | Fully functional |
-| **DataView** | ✅ | Fully functional |
+| API                          | Status | Notes                                   |
+| ---------------------------- | ------ | --------------------------------------- |
+| **Blob**                     | ⚠️     | 64KB constructor limit. See [B-01]      |
+| **File**                     | ⚠️     | Same 64KB limit as Blob                 |
+| **ArrayBuffer**              | ✅     | Fully functional                        |
+| **TypedArray** (Uint8Array)  | ✅     | Fully functional                        |
+| **DataView**                 | ✅     | Fully functional                        |
 
 ## Cryptography APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **crypto.randomUUID()** | ✅ | Fully functional |
-| **crypto.getRandomValues()** | ✅ | Fully functional |
-| **crypto.subtle.digest()** | ✅ | Supports SHA-256, SHA-384, SHA-512 |
-| **crypto.subtle.sign()** | ⚠️ | HMAC only. No RSA-PSS or ECDSA. See [B-04 limitation](/api/limitations#b-04-crypto-subtle-limited) |
-| **crypto.subtle.verify()** | ⚠️ | HMAC only. No RSA-PSS or ECDSA |
-| **crypto.subtle.encrypt()** | ❌ | Not yet implemented. Planned for v1.3 (AES-GCM priority) |
-| **crypto.subtle.decrypt()** | ❌ | Not yet implemented. Planned for v1.3 (AES-GCM priority) |
-| **crypto.subtle.importKey()** | ⚠️ | HMAC raw keys only |
-| **crypto.subtle.exportKey()** | ❌ | Not yet implemented |
-| **crypto.subtle.generateKey()** | ❌ | Not yet implemented |
-| **crypto.subtle.deriveKey()** | ❌ | Not yet implemented (HKDF, PBKDF2) |
-| **crypto.subtle.deriveBits()** | ❌ | Not yet implemented |
+| API                            | Status | Notes                                  |
+| ------------------------------ | ------ | -------------------------------------- |
+| **crypto.randomUUID()**        | ✅     | Fully functional                       |
+| **crypto.getRandomValues()**   | ✅     | Fully functional                       |
+| **crypto.subtle.digest()**     | ✅     | SHA-256, SHA-384, SHA-512              |
+| **crypto.subtle.sign()**       | ⚠️     | HMAC only. See [B-04]                  |
+| **crypto.subtle.verify()**     | ⚠️     | HMAC only                              |
+| **crypto.subtle.encrypt()**    | ❌     | Planned v1.3 (AES-GCM)                |
+| **crypto.subtle.decrypt()**    | ❌     | Planned v1.3 (AES-GCM)                |
+| **crypto.subtle.importKey()**  | ⚠️     | HMAC raw keys only                     |
+| **crypto.subtle.exportKey()**  | ❌     | Not yet implemented                    |
+| **crypto.subtle.generateKey()**| ❌     | Not yet implemented                    |
+| **crypto.subtle.deriveKey()**  | ❌     | Not yet implemented                    |
+| **crypto.subtle.deriveBits()** | ❌     | Not yet implemented                    |
 
 ## Encoding APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **TextEncoder** | ✅ | UTF-8 encoding only |
-| **TextDecoder** | ✅ | UTF-8 decoding only |
-| **atob()** | ⚠️ | 8KB buffer limit. See [B-01 limitation](/api/limitations#b-01-buffer-limits) |
-| **btoa()** | ⚠️ | 8KB buffer limit. See [B-01 limitation](/api/limitations#b-01-buffer-limits) |
+| API             | Status | Notes                                          |
+| --------------- | ------ | ---------------------------------------------- |
+| **TextEncoder** | ✅     | UTF-8 encoding only                            |
+| **TextDecoder** | ✅     | UTF-8 decoding only                            |
+| **atob()**      | ⚠️     | 8KB buffer limit. See [B-01]                   |
+| **btoa()**      | ⚠️     | 8KB buffer limit. See [B-01]                   |
 
 ## Timer APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **setTimeout()** | ✅ | Iteration-based timing (not wall-clock) |
-| **setInterval()** | ✅ | Iteration-based timing |
-| **clearTimeout()** | ✅ | Fully functional |
-| **clearInterval()** | ✅ | Fully functional |
+| API                 | Status | Notes                                      |
+| ------------------- | ------ | ------------------------------------------ |
+| **setTimeout()**    | ✅     | Iteration-based timing (not wall-clock)    |
+| **setInterval()**   | ✅     | Iteration-based timing                     |
+| **clearTimeout()**  | ✅     | Fully functional                           |
+| **clearInterval()** | ✅     | Fully functional                           |
 
 ## Abort APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **AbortController** | ✅ | Fully functional |
-| **AbortSignal** | ✅ | Fully functional |
-| **AbortSignal.timeout()** | ✅ | Uses `Error` with `name="TimeoutError"` (not `DOMException`) |
+| API                      | Status | Notes                                     |
+| ------------------------ | ------ | ----------------------------------------- |
+| **AbortController**      | ✅     | Fully functional                          |
+| **AbortSignal**          | ✅     | Fully functional                          |
+| **AbortSignal.timeout()**| ✅     | Uses `Error` with `name="TimeoutError"`   |
 
 ## Console APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **console.log()** | ⚠️ | 4KB per-value buffer limit. See [B-01 limitation](/api/limitations#b-01-buffer-limits) |
-| **console.info()** | ⚠️ | Alias for log() with same limit |
-| **console.debug()** | ⚠️ | Alias for log() with same limit |
-| **console.warn()** | ⚠️ | Same 4KB limit |
-| **console.error()** | ⚠️ | Same 4KB limit |
-| **console.assert()** | 🔨 | Planned for v1.3 |
-| **console.table()** | ❌ | Not planned (low priority) |
-| **console.time()** / **console.timeEnd()** | 🔨 | Planned for v1.3 |
+| API                                  | Status | Notes                          |
+| ------------------------------------ | ------ | ------------------------------ |
+| **console.log()**                    | ⚠️     | 4KB per-value limit. See [B-01]|
+| **console.info()**                   | ⚠️     | Alias for log(), same limit    |
+| **console.debug()**                  | ⚠️     | Alias for log(), same limit    |
+| **console.warn()**                   | ⚠️     | Same 4KB limit                 |
+| **console.error()**                  | ⚠️     | Same 4KB limit                 |
+| **console.assert()**                 | 🔨     | Planned for v1.3               |
+| **console.table()**                  | ❌     | Not planned (low priority)     |
+| **console.time()** / **timeEnd()**   | 🔨     | Planned for v1.3               |
 
 ## Foundational APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **structuredClone()** | 🔨 | Planned for v1.3. See [B-06 limitation](/api/limitations#b-06-missing-apis) |
-| **queueMicrotask()** | 🔨 | Planned for v1.3. Use `Promise.resolve().then()` workaround |
-| **performance.now()** | 🔨 | Planned for v1.3. Use `Date.now()` workaround |
-| **DOMException** | ❌ | Not implemented. Use `Error` with `.name` property |
-| **EventTarget** | ❌ | Not yet planned. Complex dependency |
-| **Event** | ❌ | Not yet planned. Requires EventTarget |
+| API                    | Status | Notes                                        |
+| ---------------------- | ------ | -------------------------------------------- |
+| **structuredClone()**  | 🔨     | Planned v1.3. See [B-06]                     |
+| **queueMicrotask()**   | 🔨     | Planned v1.3. Use `Promise.resolve().then()` |
+| **performance.now()**  | 🔨     | Planned v1.3. Use `Date.now()` workaround    |
+| **DOMException**       | ❌     | Use `Error` with `.name` property            |
+| **EventTarget**        | ❌     | Not yet planned                              |
+| **Event**              | ❌     | Not yet planned                              |
 
 ## Storage and Caching APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **Cache** | ❌ | Not yet planned. Requires storage backend |
-| **CacheStorage** | ❌ | Not yet planned |
+| API              | Status | Notes                                          |
+| ---------------- | ------ | ---------------------------------------------- |
+| **Cache**        | ❌     | Requires storage backend                       |
+| **CacheStorage** | ❌     | Not yet planned                                |
 
 ## Compression APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **CompressionStream** | ❌ | Not yet planned. Requires zlib bindings |
-| **DecompressionStream** | ❌ | Not yet planned |
+| API                     | Status | Notes                                   |
+| ----------------------- | ------ | --------------------------------------- |
+| **CompressionStream**   | ❌     | Requires zlib bindings                  |
+| **DecompressionStream** | ❌     | Not yet planned                         |
 
 ## WebSocket APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **WebSocket** | ❌ | Not yet planned. Requires persistent connection support |
+| API           | Status | Notes                                          |
+| ------------- | ------ | ---------------------------------------------- |
+| **WebSocket** | ❌     | Requires persistent connection support         |
 
 ## Navigator APIs
 
-| API | Status | Notes |
-|-----|--------|-------|
-| **navigator** | ❌ | Not yet planned. Low priority for server runtime |
-| **navigator.userAgent** | ❌ | Not yet planned |
+| API                    | Status | Notes                                     |
+| ---------------------- | ------ | ----------------------------------------- |
+| **navigator**          | ❌     | Low priority for server runtime           |
+| **navigator.userAgent**| ❌     | Not yet planned                           |
+
+## Limitation References
+
+| ID   | Summary                      | Details                                                               |
+| ---- | ---------------------------- | --------------------------------------------------------------------- |
+| B-01 | Stack buffer limits          | [Known Limitations](/api/limitations#b-01-stack-buffer-size-limits)    |
+| B-02 | Synchronous fetch            | [Known Limitations](/api/limitations#b-02-synchronous-fetch)          |
+| B-03 | WritableStream sync-only     | [Known Limitations](/api/limitations#b-03-writable-async)             |
+| B-04 | crypto.subtle HMAC only      | [Known Limitations](/api/limitations#b-04-crypto-subtle-limited)      |
+| B-05 | ReadableStream.tee() bug     | [Known Limitations](/api/limitations#b-05-tee-data-loss)              |
+| B-06 | Missing WinterCG APIs        | [Known Limitations](/api/limitations#b-06-missing-apis)               |
+| B-08 | URL read-only properties     | [Known Limitations](/api/limitations#b-08-url-read-only)              |
 
 ## Summary by Category
 
