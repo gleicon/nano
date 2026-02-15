@@ -77,32 +77,32 @@ Requirements for v1.3 Backlog Cleanup. Each maps to roadmap phases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BUF-01 | TBD | Pending |
-| BUF-02 | TBD | Pending |
-| BUF-03 | TBD | Pending |
-| BUF-04 | TBD | Pending |
-| BUF-05 | TBD | Pending |
-| ASYNC-01 | TBD | Pending |
-| ASYNC-02 | TBD | Pending |
-| ASYNC-03 | TBD | Pending |
-| CRYPT-01 | TBD | Pending |
-| CRYPT-02 | TBD | Pending |
-| CRYPT-03 | TBD | Pending |
-| CRYPT-04 | TBD | Pending |
-| CRYPT-05 | TBD | Pending |
-| STRM-01 | TBD | Pending |
-| STRM-02 | TBD | Pending |
-| WNCG-01 | TBD | Pending |
-| WNCG-02 | TBD | Pending |
-| WNCG-03 | TBD | Pending |
-| URL-01 | TBD | Pending |
-| URL-02 | TBD | Pending |
+| BUF-01 | v1.3-01 | Pending |
+| BUF-02 | v1.3-01 | Pending |
+| BUF-03 | v1.3-01 | Pending |
+| BUF-04 | v1.3-01 | Pending |
+| BUF-05 | v1.3-01 | Pending |
+| ASYNC-01 | v1.3-01 | Pending |
+| ASYNC-02 | v1.3-01 | Pending |
+| ASYNC-03 | v1.3-01 | Pending |
+| CRYPT-01 | v1.3-02 | Pending |
+| CRYPT-02 | v1.3-02 | Pending |
+| CRYPT-03 | v1.3-02 | Pending |
+| CRYPT-04 | v1.3-02 | Pending |
+| CRYPT-05 | v1.3-02 | Pending |
+| STRM-01 | v1.3-02 | Pending |
+| STRM-02 | v1.3-02 | Pending |
+| WNCG-01 | v1.3-03 | Pending |
+| WNCG-02 | v1.3-03 | Pending |
+| WNCG-03 | v1.3-03 | Pending |
+| URL-01 | v1.3-03 | Pending |
+| URL-02 | v1.3-03 | Pending |
 
 **Coverage:**
 - v1.3 requirements: 20 total
-- Mapped to phases: 0
-- Unmapped: 20 (pending roadmap creation)
+- Mapped to phases: 20
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-15*
-*Last updated: 2026-02-15 after initial definition*
+*Last updated: 2026-02-15 after v1.3 roadmap creation*

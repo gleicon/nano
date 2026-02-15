@@ -5,20 +5,20 @@
 See: .planning/PROJECT.md (updated 2026-02-15)
 
 **Core value:** Skip the container fleet entirely — one process hosts many isolated JS apps
-**Current focus:** v1.3 Backlog Cleanup — fixing all known limitations
+**Current focus:** v1.3 Backlog Cleanup — Phase v1.3-01: Async Foundation
 
 ## Current Position
 
 Milestone: v1.3 Backlog Cleanup
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-15 — Milestone v1.3 started
+Phase: v1.3-01 of v1.3-03 (Async Foundation)
+Plan: 0 of 3 in current phase
+Status: Ready to plan
+Last activity: 2026-02-15 — v1.3 roadmap created, 3 phases, 20 requirements mapped
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
 Progress: [##########] 100% (v1.2)
-Progress: [░░░░░░░░░░] 0% (v1.3)
+Progress: [░░░░░░░░░░] 0% (v1.3 — 0/8 plans complete)
 
 ## Shipped Milestones
 
@@ -44,19 +44,25 @@ See `.planning/MILESTONES.md` for details.
 
 Decisions are logged in PROJECT.md Key Decisions table (13 decisions total).
 
+Recent decisions affecting v1.3:
+- [v1.3 planning]: Phase 1 is critical path — BUF-* must land before ASYNC-* (allocator context first)
+- [v1.3 planning]: AES-CBC excluded (padding oracle risk); AES-GCM only
+- [v1.3 planning]: RSA-PSS deferred concern — Zig stdlib has verify but signing may need custom impl; validated during v1.3-02
+
 ### Pending Todos
 
 None.
 
 ### Blockers/Concerns
 
-None.
+- xev socket API details need pre-research before v1.3-01-02 (async fetch plan): confirm libxev Tcp completion callback signature
+- ECDSA key import: ASN.1 DER parsing for PKCS#8/SPKI may need lightweight parser — validate during v1.3-02-02
 
 ## Session Continuity
 
 Last session: 2026-02-15
-Stopped at: v1.3 milestone initialization
+Stopped at: v1.3 roadmap created — ready to plan Phase v1.3-01
 Resume file: None
 
 ---
-*Last updated: 2026-02-15 after v1.3 milestone start*
+*Last updated: 2026-02-15 after v1.3 roadmap creation*
