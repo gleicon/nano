@@ -1,524 +1,317 @@
-# Pitfalls Research: JavaScript Isolate Runtime
+# Domain Pitfalls: Adding Features to Zig+V8+xev Runtime
+
+**Domain:** Zig runtime with V8 engine and libxev event loop (WinterCG-compatible server)
+**Researched:** 2026-02-15
+**Confidence:** MEDIUM-HIGH
+**Context:** NANO project — adding async fetch, crypto.subtle, structuredClone, tee(), and heap allocation
+
+---
 
 ## Critical Pitfalls
 
-These will **definitely break the project** if ignored.
+### Pitfall 1: Arena Allocator Lifetime Mismatch — Heap Pointers Outlive Arena
 
-### 1. HandleScope Mismanagement
+**What goes wrong:**
+Memory allocated within an arena continues to be referenced by V8 handles or JavaScript objects after the arena is freed at request end. Accessing these pointers later causes use-after-free, data corruption, and crashes. Example: Storing a pointer to a heap-allocated buffer in a V8 Persistent handle, then freeing the arena at request end, leaving the handle pointing to freed memory.
 
-**The Problem:** V8 local handles are garbage collected. Without proper HandleScope, handles become invalid mid-execution.
+**Why it happens:**
+- NANO uses request-scoped ArenaAllocators that deinit after each request
+- V8 Persistent handles (for callbacks, timers, promises) survive request scope
+- Developer assumes arena cleanup is sufficient, forgetting that some pointers escape request scope
+- No automatic tracking of pointer ownership across request/isolate boundaries
+- Easy to allocate in arena for "temporary" use, then accidentally store reference
 
-```cpp
-// WRONG - handle becomes invalid
-v8::Local<v8::String> GetString(v8::Isolate* isolate) {
-  return v8::String::NewFromUtf8(isolate, "hello").ToLocalChecked();
-  // Handle is on stack, becomes invalid when function returns
-}
+**How to avoid:**
+1. **Allocator segregation:** Use arena only for request-lifetime data (response body, temporary buffers). Use persistent allocator (page_allocator or GPA) for data referenced by V8 handles or timers.
+2. **Explicit ownership annotation:** Document which allocator each buffer/pointer came from. Never mix allocators in the same data structure without clear ownership semantics.
+3. **Defer-free pattern:** If arena-allocated data must survive request, copy it to persistent allocator before returning:
+   ```zig
+   // WRONG: Returning arena-allocated string from callback
+   const temp_buf = arena.alloc(u8, len) catch return;
 
-// CORRECT - caller's HandleScope keeps handle alive
-v8::Local<v8::String> GetString(v8::Isolate* isolate) {
-  v8::EscapableHandleScope scope(isolate);
-  auto str = v8::String::NewFromUtf8(isolate, "hello").ToLocalChecked();
-  return scope.Escape(str);  // Moves to outer scope
-}
-```
+   // CORRECT: Copy to persistent allocator
+   const persistent_buf = persistent_allocator.dupe(u8, temp_buf) catch {
+       js.throw(isolate, "OOM");
+       return;
+   };
+   ```
+4. **Callback data must be persistent:** Any data passed to V8 callbacks (timer handlers, Promise continuations) must use non-arena allocators
+5. **Test with debug allocator:** Run with `std.heap.debug_allocator` to detect use-after-free early.
 
-**Prevention:**
-- Every function touching V8 values needs HandleScope
-- Use EscapableHandleScope to return values
-- Never store Local<> handles long-term (use Persistent<> or Global<>)
+**Warning signs:**
+- Segfaults or data corruption after request completion
+- Crashes in microtask processing or timer callbacks
+- ASAN reports "heap-use-after-free" or "attempting to free already-freed memory"
+- Memory address patterns in backtraces suggest addresses from freed arena
 
-**Phase Impact:** Phase 1 - must be correct from the start
+**Phase to address:**
+**Phase 1 (Heap allocation)** — Establish allocator discipline before async work adds callback complexity.
 
-### 2. Isolate Threading Violations
+---
 
-**The Problem:** V8 isolates are **single-threaded**. Touching an isolate from wrong thread = undefined behavior (usually crash).
+### Pitfall 2: Promise Resolution Out-of-Context — V8 Microtask Corruption
 
-```cpp
-// WRONG - calling from wrong thread
-std::thread([isolate]() {
-  isolate->Enter();  // CRASH: wrong thread
-}).detach();
+**What goes wrong:**
+Async operations (fetch, timers) complete and attempt to resolve Promises, but the V8 isolate/context is not entered when the Promise callback executes. This causes V8 API calls to crash, or silently corrupt Promise state. Symptoms: "Isolate is not available," crashes in Promise::Resolve(), or infinite pending Promises.
 
-// CORRECT - use Locker for multi-threaded access
-std::thread([isolate]() {
-  v8::Locker lock(isolate);
-  v8::Isolate::Scope isolate_scope(isolate);
-  // Now safe
-}).join();
-```
+**Why it happens:**
+- libxev completion callbacks run asynchronously
+- V8 requires explicit isolate.enter()/context.enter() before any API call
+- Promise resolution happens in microtask queue, which only processes when isolate is active
+- Single-threaded runtime means callbacks and request handlers interleave
+- Previous NANO bug: xev timer callbacks not entering isolate+HandleScope+context → fatal crash
 
-**Prevention:**
-- One thread owns each isolate
-- If sharing isolates, use v8::Locker
-- Design for single-threaded isolates, multiple isolates per process
+**How to avoid:**
+1. **Always wrap completion handlers:** Every xev completion callback must establish V8 context before calling V8 API
+2. **Microtask checkpoint after callbacks:** After xev event loop tick, call `isolate.performMicrotasksCheckpoint()` to process Promise resolutions
+3. **Per-completion state storage:** Use userdata pointer to access isolate/app from stateless callbacks
+4. **Avoid nested Promise resolution:** Don't resolve Promises from within callbacks; queue to next tick
 
-**Phase Impact:** Phase 3 - when adding concurrency
+**Warning signs:**
+- "Isolate is not available" errors from V8 API calls
+- V8 crashes (segfault) in Promise-related code
+- Promises that never resolve (appear to hang forever)
+- Stack traces showing crash inside V8_Promise or V8_Microtask
 
-### 3. Memory Limits Not Enforced
+**Phase to address:**
+**Phase 2 (Async fetch + timers refinement)** — Make isolate/context management a required pattern.
 
-**The Problem:** Without explicit limits, one app can exhaust process memory and crash everything.
+---
 
-```cpp
-// WRONG - no limits
-v8::Isolate* isolate = v8::Isolate::New(create_params);
+### Pitfall 3: ReadableStream.tee() Unbounded Memory Accumulation
 
-// CORRECT - enforce limits
-v8::ResourceConstraints constraints;
-constraints.set_max_old_generation_size_in_bytes(128 * 1024 * 1024);  // 128MB
-constraints.set_max_young_generation_size_in_bytes(16 * 1024 * 1024); // 16MB
-create_params.constraints = constraints;
-v8::Isolate* isolate = v8::Isolate::New(create_params);
-```
+**What goes wrong:**
+When a ReadableStream is teed into two branches, if one branch reads slower than the other (or not at all), data accumulates in the slower branch's queue **without backpressure**. In a server environment, this causes memory to grow unbounded. Example: A large file is teed; one branch streams to network (fast), the other caches to disk (slow) — memory fills up.
 
-**Prevention:**
-- Set memory limits at isolate creation
-- Monitor heap usage with `isolate->GetHeapStatistics()`
-- Terminate and recreate if limits exceeded
+**Why it happens:**
+- WHATWG Streams spec allows tee() to buffer data from origin stream to both branches
+- Origin stream only knows about faster consumer's pull rate
+- If one branch has no active reader, all data accumulates in its queue
+- No built-in limit or backpressure between branches
+- ReadableStream.tee() is a common operation, making this easy to trigger
+- Difficult to detect until memory exhaustion
 
-**Phase Impact:** Phase 5 - production hardening
+**How to avoid:**
+1. **Never use built-in tee() for large unbounded streams:** Replace with explicit buffering logic that respects both consumers
+2. **Set explicit highWaterMark on both branches:** Reduces default buffering
+3. **Monitor queue sizes at runtime:** Alert when one branch's queue exceeds threshold
+4. **Document tee() limitations:** Make clear it's only safe for small or balanced-consumption streams
+5. **Rate-limit or timeout slow consumers:** Cancel unread branches after N seconds
 
-### 4. CPU Time Bombs
+**Warning signs:**
+- Memory usage grows steadily with each teed stream operation
+- Process memory exceeds limits despite completed requests recycling
+- One branch of teed stream is created but never consumed
+- Garbage collection logs show retention of large buffers
 
-**The Problem:** Infinite loops or expensive computations block the entire process.
+**Phase to address:**
+**Phase 3 (ReadableStream.tee() feature)** — Include backpressure in tee() or provide "safe-tee" wrapper.
 
-```javascript
-// Malicious or buggy code
-while(true) {}  // Blocks forever
-```
+---
 
-**Prevention:**
-```cpp
-// Set execution timeout
-isolate->SetCaptureStackTraceForUncaughtExceptions(true);
+### Pitfall 4: Timing Side-Channels in Padding Validation (AES-CBC Crypto)
 
-// Watchdog thread
-std::thread watchdog([isolate, &done]() {
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  if (!done) {
-    isolate->TerminateExecution();
-  }
-});
-```
+**What goes wrong:**
+When implementing AES-CBC decryption with padding validation, execution time leaks information about plaintext. An attacker measures response times and reconstructs plaintext byte-by-byte without knowing the key. This is the "padding oracle" attack, exploited via Lucky Thirteen (2013).
 
-**Phase Impact:** Phase 5 - must have before any untrusted code
+**Why it happens:**
+- Crypto operations must validate padding
+- Most implementations check with straightforward code with timing branches
+- Microsecond-level differences accumulate across requests
+- Network timing can measure these differences
+- Easy oversight: padding validation often not considered cryptographically sensitive
 
-## V8 Embedding Gotchas
+**How to avoid:**
+1. **Use AEAD modes (GCM, ChaCha20Poly1305) instead of CBC:** These authenticate ciphertext and don't require padding. This is TLS 1.3 recommendation (RFC 8446)
+2. **If CBC required, use constant-time padding check:** Check ALL padding bytes in constant time, not branching on validity
+3. **Document crypto.subtle.decrypt() with warnings:** Note CBC is deprecated and unsafe
+4. **Test with timing analysis tools:** Use valgrind --tool=cachegrind or timing test harnesses
+5. **Avoid manual crypto:** Use established libraries (libcrypto, ring, Zig's std.crypto) that are audited
 
-### GC Callback Timing
+**Warning signs:**
+- Using AES-CBC mode in new code
+- Padding validation code with branches (`if (valid) ... else ...`)
+- Mixed use of CBC alongside GCM
+- No documentation warning users about CBC limitations
 
-**The Problem:** V8's GC can run at unexpected times, invalidating assumptions.
+**Phase to address:**
+**Phase 4 (Expanding crypto.subtle)** — Declare crypto operations with clear CBC deprecation. Implement only GCM; CBC requires explicit opt-in with warning.
 
-```cpp
-// WRONG - pointer may be invalid after allocation
-char* data = GetExternalData();
-auto str = v8::String::NewFromUtf8(isolate, "trigger GC");  // GC might run here
-UseData(data);  // data pointer may be invalid if GC moved things
+---
 
-// CORRECT - pin external data or re-acquire after V8 calls
-```
+### Pitfall 5: structuredClone with Circular References and V8 Serialization State
 
-**Prevention:**
-- Assume any V8 call can trigger GC
-- Don't hold raw pointers across V8 calls
-- Use SetData()/GetData() for persistent embedder data
+**What goes wrong:**
+When implementing structuredClone, circular references or non-cloneable types (functions, DOM nodes, WeakMap) can cause V8's serialization machinery to enter an inconsistent state. Subsequent clone attempts fail mysteriously, or the serializer hangs during deep traversal. Large circular structures can cause stack overflow.
 
-### TryCatch Scope Confusion
+**Why it happens:**
+- structuredClone() must detect and handle circular references
+- V8's Serializer API maintains state (visited objects, pending references)
+- If state isn't reset between clones, it carries over
+- Non-cloneable types must be explicitly rejected; detecting all edge cases is hard
+- User code may create highly nested or pathological structures
+- Easy to implement a simple version that works 90% of the time
 
-**The Problem:** Exception handling in V8 is scope-based, not stack-based.
+**How to avoid:**
+1. **Use V8's built-in structured clone when possible:** V8 provides safe, audited implementation
+2. **Validate cloneable types upfront:** Check object graph before attempting clone to catch non-cloneable types early
+3. **Reset serializer state between clones:** Or create new serializer for each clone
+4. **Limit recursion depth:** Detect and prevent stack overflow from deeply nested structures (cap at ~1000 levels)
+5. **Document limitations:** Make clear which types are not cloneable (functions, Symbols, WeakMap, WeakSet, DOM nodes, Proxy)
+6. **Test with pathological inputs:** Circular references, huge objects, mixed cloneable/non-cloneable types
 
-```cpp
-// WRONG - exception lost
-void Outer(v8::Isolate* isolate) {
-  v8::TryCatch try_catch(isolate);
-  Inner(isolate);  // Exception in Inner
-  // try_catch sees the exception here, but...
-}
+**Warning signs:**
+- Clone operation hangs or times out on certain objects
+- V8 crashes with "Serializer::serialize()" in stack
+- Performance degrades when cloning large objects with many circular refs
+- Subsequent clones fail after one pathological clone attempt
+- Stack overflow (segfault with stack exhaustion) on deeply nested objects
 
-void Inner(v8::Isolate* isolate) {
-  v8::TryCatch inner_catch(isolate);
-  ThrowError();
-  // inner_catch catches it, outer never sees it
-}
-```
+**Phase to address:**
+**Phase 5 (Adding structuredClone)** — Use V8's native implementation where available. Include extensive testing.
 
-**Prevention:**
-- TryCatch at the right level (usually outermost)
-- Check `try_catch.HasCaught()` immediately after risky calls
-- Use `try_catch.ReThrow()` to propagate
+---
 
-### Context vs Isolate Confusion
+## Technical Debt Patterns
 
-**The Problem:** Multiple contexts in one isolate can cross-contaminate.
+| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
+|----------|-------------------|----------------|-----------------|
+| **Single allocator for all request data** | Simpler code | Memory leaks when data outlives request | Never |
+| **No context enter/exit in callbacks** | Slightly faster | Crashes, data corruption, Promise hangs | Never |
+| **Use tee() for any stream splitting** | Fast to implement | Unbounded memory on unbalanced consumers | Only for small/balanced streams |
+| **Padding validation with branches** | Matches common pattern | Timing oracle vulnerability | Never |
+| **Custom structuredClone from scratch** | Full control | Edge case crashes, security issues | Only if V8 API unavailable |
+| **Skip error handling in callbacks** | Shorter code | Unhandled rejections, hangs | Never |
 
-```
-Isolate
-├── Context A (App 1)
-│   └── globalThis.secret = "password"
-└── Context B (App 2)
-    └── Can potentially access Context A?
-```
+---
 
-**Prevention:**
-- One context per isolate for multi-tenant (NANO's approach)
-- Don't share contexts between apps
-- If using multiple contexts, understand security implications
+## Integration Gotchas
 
-## Isolation Failures
+| Integration | Common Mistake | Correct Approach |
+|-------------|----------------|------------------|
+| **Fetch + Arena Allocator** | Allocate buffer in arena, pass to callback | Copy to persistent allocator before resolving |
+| **xev Timer + V8 Context** | Call V8 API without entering isolate | Always isolate.enter(); context.enter() before V8 calls |
+| **Streams + Backpressure** | Ignore desiredSize from controller | Check desiredSize; pause source if negative |
+| **crypto.subtle + Key Format** | Assume key format from parameter name | Validate algorithm.format matches actual key data |
+| **Async/await + Event Loop** | Assume Promise resolves immediately | Remember microtasks don't run until checkpoint() called |
+| **ReadableStream + Piping** | Pipe without checking return value | Always await result; handle backpressure errors |
 
-### Spectre/Meltdown Side Channels
-
-**The Problem:** CPU timing attacks can leak data across isolate boundaries.
-
-**Cloudflare's Response:**
-- Disable `SharedArrayBuffer` (prevents precise timing)
-- Reduce `performance.now()` precision
-- Isolate groups with different security levels in different processes
-
-**NANO Prevention:**
-- Don't expose SharedArrayBuffer initially
-- Limit timer precision
-- Document that same-process isolation is not cryptographic
-
-### Prototype Pollution
-
-**The Problem:** Modifying built-in prototypes affects all code in the context.
-
-```javascript
-// App A
-Array.prototype.forEach = function() { /* malicious */ };
-
-// App B (same context - BAD)
-[1,2,3].forEach(x => console.log(x));  // Runs malicious code
-```
-
-**NANO Prevention:**
-- Separate isolates per app (not just contexts)
-- Freeze built-in prototypes if sharing contexts
-- Never share contexts between untrusted apps
-
-### Native Binding Escapes
-
-**The Problem:** Bugs in native bindings can expose host capabilities.
-
-```javascript
-// If fetch() binding has a bug...
-fetch("file:///etc/passwd")  // Should be blocked but might not be
-```
-
-**Prevention:**
-- Allowlist protocols (http, https only)
-- Validate all inputs in native code
-- Never pass raw file paths from JS to native
+---
 
 ## Performance Traps
 
-### Creating Isolates Per Request
-
-**The Problem:** Isolate creation is expensive (40-100ms without snapshots).
-
-```cpp
-// WRONG - slow path on every request
-void HandleRequest() {
-  v8::Isolate* isolate = v8::Isolate::New(params);  // 40ms+
-  // handle request
-  isolate->Dispose();
-}
-```
-
-**Prevention:**
-- Pool isolates (reuse warm isolates)
-- Use snapshots for fast creation
-- Pre-warm isolates during low traffic
-
-### String Encoding Conversions
-
-**The Problem:** UTF-8 ↔ UTF-16 conversion on every string crossing.
-
-```cpp
-// Every JS string → native crosses encoding boundary
-v8::String::Utf8Value utf8(isolate, js_string);  // Allocates, converts
-```
-
-**Prevention:**
-- Minimize string crossings
-- Use ArrayBuffer for binary data (no encoding)
-- Cache converted strings when possible
-- Use V8's one-byte strings when ASCII-only
-
-### Synchronous Native Calls Blocking Event Loop
-
-**The Problem:** Blocking native calls freeze all apps in the process.
-
-```javascript
-// If fetch() is synchronous...
-const resp = fetch(slow_url);  // Blocks entire process for 5 seconds
-```
-
-**Prevention:**
-- All I/O must be async
-- Use non-blocking native event loop
-- Offload slow work to thread pool
-
-### Cold Start Hidden in Warm Paths
-
-**The Problem:** Lazy initialization that triggers on first request.
-
-```cpp
-// First request pays initialization cost
-static bool initialized = false;
-if (!initialized) {
-  HeavyInitialization();  // 100ms one-time cost
-  initialized = true;
-}
-```
-
-**Prevention:**
-- Initialize everything at startup
-- Measure first-request vs subsequent latency
-- Put heavy init in snapshot creation
-
-## Zig + C++ Interop Issues
-
-### Zig Allocator vs C++ new/delete
-
-**The Problem:** Memory allocated by C++ must be freed by C++, and vice versa.
-
-```zig
-// WRONG - freeing C++ memory with Zig allocator
-const ptr = v8_get_string();  // C++ allocated
-allocator.free(ptr);  // Zig trying to free - CRASH
-
-// CORRECT - use matching deallocation
-const ptr = v8_get_string();
-v8_free_string(ptr);  // C++ frees its own memory
-```
-
-**Prevention:**
-- Clear ownership rules (who allocates, who frees)
-- Wrapper functions that handle allocation on one side
-- Arena allocator on Zig side, let C++ manage its own
-
-### C++ Exception Propagation
-
-**The Problem:** C++ exceptions don't propagate through Zig stack frames.
-
-```cpp
-// C++ throws
-void cpp_function() {
-  throw std::runtime_error("error");
-}
-
-// Zig calls it
-extern fn cpp_function() void;  // No exception handling
-```
-
-**Prevention:**
-- Wrap all C++ calls in try/catch at the boundary
-- Return error codes instead of throwing
-- V8 uses TryCatch, not C++ exceptions (good)
-
-### Callback Function Pointer Lifetimes
-
-**The Problem:** Zig function pointers passed to C++ can become invalid.
-
-```zig
-// WRONG - closure might be freed
-const callback = struct {
-  fn call() void { ... }
-}.call;
-v8_set_callback(&callback);  // Pointer to stack
-
-// CORRECT - use persistent function pointers
-fn myCallback() callconv(.C) void { ... }
-v8_set_callback(&myCallback);  // Function pointer always valid
-```
-
-**Prevention:**
-- Use `callconv(.C)` for C-compatible functions
-- No closures passed to C (capture state differently)
-- Keep callback data alive for duration of use
-
-### String Encoding Between Zig and V8
-
-**The Problem:** Zig uses UTF-8, V8 uses UTF-16 internally.
-
-```zig
-// Need conversion layer
-const zig_string: []const u8 = "hello";  // UTF-8
-// Must convert to V8's expected format
-```
-
-**Prevention:**
-- Use V8's UTF-8 APIs where available
-- Write conversion helpers once, test thoroughly
-- Consider ExternalOneByteString for ASCII content
+| Trap | Symptoms | Prevention | When It Breaks |
+|------|----------|------------|----------------|
+| **Memory accumulation in tee()** | Steady growth; no GC recovery | Monitor queue sizes; cap slow consumers | >10MB streams with 2+ tee() branches |
+| **Promise chaining in callbacks** | Tick count grows; CPU stuck | Resolve on next tick, not recursively | >100 chained Promises per request |
+| **Allocator fragmentation** | free() accumulate; arena not freed | Use arena.deinit() properly; segregate allocators | Thousands of allocs per request |
+| **Microtask queue overflow** | performMicrotasksCheckpoint() hangs | Limit pending Promises | >10K pending Promises per isolate |
+| **Deep object cloning** | structuredClone() hangs; CPU 100% | Implement depth limit | Objects with >1000 nesting levels |
+| **Crypto stream processing** | CPU spikes; latency jitter | Chunk crypto operations | >100MB files encrypted at once |
 
 ---
 
-## v1.2 Production Polish: Key Pitfalls
+## Security Mistakes
 
-### Streams Pitfalls
-
-**S1: Unbounded Queue Growth**
-- Arena allocator exhausted by streaming responses where producer > consumer
-- Check `controller.desiredSize` before enqueue; implement pull-based streaming
-- Phase: 01-streams
-
-**S2: TransformStream Backpressure Bypass**
-- `controller.enqueue()` ignores backpressure, violates WHATWG spec
-- Check `desiredSize <= 0`, return Promise if queue full
-- Phase: 01-streams
-
-**S3: Chunk Lifetime Across V8/Zig Boundary**
-- Zig arena memory freed while V8 holds stream chunk reference → use-after-free
-- Clear ownership: V8 owns ArrayBuffer OR Zig copies on boundary; use `ArrayBuffer::Externalize()`
-- Phase: 01-streams
-
-**Integration - Arena + Streams**
-- Streams outlive request; arena freed mid-streaming
-- Separate allocator for stream buffers OR reference counting OR copy to V8 heap
-- Phase: 01-streams CRITICAL
-
-**Integration - Watchdog + Streams**
-- CPU watchdog (5s) terminates long-running streams → corrupted response
-- Track CPU time not wall clock; I/O wait doesn't count; extend timeout for streams
-- Phase: 01-streams
-
-### Graceful Shutdown Pitfalls
-
-**G1: Signal Handler Race**
-- Signal handler modifies state while V8 executing → inconsistent state (CWE-364)
-- Handler ONLY sets atomic flag; use `signalfd()` or self-pipe for integration
-- Phase: 02-shutdown
-
-**G2: No In-Flight Request Tracking**
-- Server closes socket while processing request → partial response, connection reset
-- Add atomic counter for in-flight; shutdown waits counter==0 or 30s timeout
-- Phase: 02-shutdown
-
-**G3: App Removal Without Drain**
-- `DELETE /admin/apps` removes immediately; in-flight requests lose isolate → crash
-- Mark app "draining" first (stop routing); wait for in-flight; return 503 for new
-- Phase: 02-shutdown
-
-**Integration - Hot Reload + Shutdown**
-- Config reload and full shutdown use different paths → bugs in one but not other
-- Extract common "app drain + dispose" logic; use same path for all removal scenarios
-- Phase: 02-shutdown
-
-### Environment Variable Pitfalls
-
-**E1: Process.env Contamination**
-- Modifying global `process.env` leaks one app's secrets to other apps (critical multi-tenant)
-- Per-isolate env on context global; freeze after creation; each isolate gets copy
-- Phase: 03-env-vars
-
-**E2: Prototype Pollution**
-- Plain JS env object allows `env.__proto__.SECRET = "hack"` → prototype chain pollution
-- Create with `Object.create(null)`, freeze, use V8 template with null prototype
-- Phase: 03-env-vars
-
-**E3: Leakage via Side Channels**
-- Secrets leak through error messages, logs, stack traces even with isolation
-- Sanitize errors; never log env values; separate "secrets" from "config"; redact traces
-- Phase: 03-env-vars
-
-**Integration - Multi-App Env Isolation**
-- Env vars stored on shared structures → isolation fails
-- Env vars per-isolate, not per-platform; test with multiple apps same key, different values
-- Phase: 03-env-vars
+| Mistake | Risk | Prevention |
+|---------|------|-----------|
+| **AES-CBC without constant-time check** | Padding oracle; plaintext recovery | Use AES-GCM; document CBC deprecated |
+| **Exposing key material in errors** | Key disclosure; Cryptanalysis | Never log keys; generic error messages |
+| **Trusting keys without format validation** | Wrong key; cipher mismatch; OOM | Validate algorithm.format before import |
+| **Not checking verify() return value** | Unsigned data accepted; Auth bypass | Always check result explicitly |
+| **Large structuredClone without limits** | DOS via memory exhaustion | Implement size/depth limits |
+| **Fetch without timeout** | Hanging requests; Resource exhaustion | Always set AbortSignal.timeout() |
+| **Stream data without validation** | Malformed data processed; DOS | Validate chunks before enqueue |
 
 ---
 
-## Prevention Checklist by Phase
+## "Looks Done But Isn't" Checklist
 
-### Phase 1: V8 Foundation
-- [ ] HandleScope in every V8-touching function
-- [ ] EscapableHandleScope for returning handles
-- [ ] TryCatch at execution boundaries
-- [ ] Clear allocator ownership rules
-- [ ] No closures passed to C++
+- [ ] **Async fetch:** AbortSignal timeout actually cancels request (test with slow network)
+- [ ] **Async fetch:** Promise resolves in correct isolate/context (access response properties)
+- [ ] **Async fetch:** Backpressure works (slow consumer doesn't OOM server)
+- [ ] **crypto.subtle:** Key import with all formats (raw, pkcs8, spki, jwk)
+- [ ] **crypto.subtle:** Error handling for invalid algorithms
+- [ ] **crypto.subtle:** Constant-time comparison in verify() (timing analysis tool)
+- [ ] **ReadableStream.tee():** Memory constant during 1GB tee() with 10:1 ratio
+- [ ] **ReadableStream.tee():** Cancellation of one branch; other continues
+- [ ] **structuredClone:** Circular references (must not hang)
+- [ ] **structuredClone:** Non-cloneable types throw DataCloneError
+- [ ] **structuredClone:** Deeply nested objects don't stack overflow
+- [ ] **All allocations:** Debug allocator finds no use-after-free or double-free
+- [ ] **All async ops:** Max iteration limit catches infinite loops
+- [ ] **All Promises:** Eventually settle (test with watchdog)
 
-### Phase 2: API Surface
-- [ ] All native bindings return errors, not throw
-- [ ] Protocol validation in fetch (http/https only)
-- [ ] Timer precision limits (1ms minimum)
-- [ ] No SharedArrayBuffer exposure
+---
 
-### Phase 3: Multi-App Routing
-- [ ] One isolate per app (not shared contexts)
-- [ ] Isolate affinity (same thread always)
-- [ ] No cross-app references possible
+## Recovery Strategies
 
-### Phase 4: Snapshots
-- [ ] Snapshot creation tested with all APIs
-- [ ] Cold start measured and validated
-- [ ] Snapshot versioning (rebuild on API change)
+| Pitfall | Recovery Cost | Recovery Steps |
+|---------|---------------|----------------|
+| **Arena use-after-free** | HIGH | Identify outliving data; migrate to persistent allocator; audit all callbacks |
+| **Promise hanging** | HIGH | Check for missing isolate/context enter; verify microtask checkpoint; add watchdog |
+| **Stream unbounded memory** | MEDIUM | Monitor queue sizes; pause if exceeds limit; replace tee() with backpressure-aware |
+| **Padding oracle** | MEDIUM | Migrate from AES-CBC to GCM; implement constant-time if CBC required |
+| **structuredClone crash** | MEDIUM | Add depth/size limits; reset serializer state; test pathological inputs |
+| **Memory corruption** | HIGH | Use ASAN; audit allocators; implement lifecycle validation |
 
-### Phase 5: Production Hardening
-- [ ] Memory limits enforced at creation
-- [ ] CPU watchdog terminates runaways
-- [ ] Heap statistics monitoring
-- [ ] Structured error responses (no stack traces to clients)
+---
 
-### v1.2: Streams API
-- [ ] Pull-based streaming (not pump/start)
-- [ ] Backpressure check before enqueue
-- [ ] Chunk ownership model clear (V8 or Zig)
-- [ ] Memory bounded (highWaterMark enforced)
-- [ ] Arena vs stream allocator separation
+## Pitfall-to-Phase Mapping
 
-### v1.2: Graceful Shutdown
-- [ ] Signal handler only sets atomic flag
-- [ ] In-flight request counter
-- [ ] Drain timeout separate from request timeout
-- [ ] App removal drains requests first
-- [ ] Config watcher stops first in shutdown
+| Pitfall | Prevention Phase | Verification |
+|---------|------------------|--------------|
+| Arena allocator lifetime | Phase 1 | Debug allocator finds no use-after-free |
+| Promise resolution context | Phase 2 | Fetch completes; Promise resolves; response access works |
+| Stream.tee() unbounded memory | Phase 3 | Memory constant during 1GB tee() with 10:1 ratio; no OOM |
+| Padding oracle in crypto | Phase 4 | AES-CBC deprecated; GCM default; constant-time checks |
+| structuredClone edge cases | Phase 5 | Circular refs handled; non-cloneable rejected; depth limit |
+| xev timer context | Phase 2 | Timers fire and update V8 state; no isolate errors |
+| Fetch timeout handling | Phase 2 | AbortSignal timeout cancels; no hanging requests |
+| Stream backpressure | Phase 3 | desiredSize checked; source paused when full |
 
-### v1.2: Environment Variables
-- [ ] Per-isolate env storage (not global)
-- [ ] Object.create(null), then freeze
-- [ ] No `process.env` modification
-- [ ] Error sanitization (no env leaks)
-- [ ] Env var size limits (64 vars, 5KB each)
+---
 
-## Testing Strategies
+## Critical Implementation Rules
 
-### Memory Leak Detection
-```bash
-zig build -Drelease-safe -fsanitize=address
-```
+1. **Allocator discipline is non-negotiable:** Every allocation must have an owner and clear lifetime. Document allocator choice in code.
 
-### Isolation Verification
-```javascript
-// App A
-globalThis.secret = "A's secret";
-// App B
-console.assert(globalThis.secret === undefined);
-```
+2. **Always enter isolate before V8 API:** No exceptions. Wrap all V8 calls in isolate.enter()/context.enter() pairs. Use defer for cleanup.
 
-### Shutdown Testing
-```bash
-for i in {1..100}; do curl "http://localhost:8080/slow" & done
-kill -TERM $NANO_PID
-# Verify: no crashes, graceful completion or errors
-```
+3. **Microtasks must run:** After every event loop tick, call `isolate.performMicrotasksCheckpoint()`. Without this, Promises hang.
 
-### Streams Memory Test
-```javascript
-const rs = new ReadableStream({
-  pull(c) { c.enqueue(new Uint8Array(1024)); }
-});
-const ws = new WritableStream({
-  write(chunk) { return new Promise(r => setTimeout(r, 100)); }
-});
-rs.pipeTo(ws);
-// Memory should stay bounded
-```
+4. **Test error paths:** Ensure every callback, Promise, and stream operation has error handling. Test with invalid inputs.
 
-### Env Isolation Test
-```javascript
-// App A: env.SECRET = "A"
-// App B: console.assert(env.SECRET === "B")
-```
+5. **Use AEAD crypto, not CBC:** Default to AES-GCM. If CBC required for compatibility, document the risk and implement constant-time validation.
+
+6. **Monitor stream queues:** Track byte size; implement backpressure. Never trust tee() for large unbounded streams.
+
+7. **structuredClone needs limits:** Implement depth and size limits upfront. Test with pathological inputs.
+
+---
+
+## Sources
+
+- [Allocators | zig.guide](https://zig.guide/standard-library/allocators/)
+- [Learning Zig - Heap Memory & Allocators](https://www.openmymind.net/learning_zig/heap_memory/)
+- [Be Careful When Assigning ArenaAllocators](https://www.openmymind.net/Be-Careful-When-Assigning-ArenaAllocators/)
+- [How (memory) safe is zig?](https://www.scattered-thoughts.net/writing/how-safe-is-zig/)
+- [Faster async functions and promises · V8](https://v8.dev/blog/fast-async)
+- [Proposal: ReadableStream tee() backpressure · Issue #1235 · whatwg/streams](https://github.com/whatwg/streams/issues/1235)
+- [ReadableStream: tee() method - Web APIs | MDN](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream/tee)
+- [Padding oracle attack - Wikipedia](https://en.wikipedia.org/wiki/Padding_oracle_attack)
+- [CBC decryption vulnerability - .NET | Microsoft Learn](https://learn.microsoft.com/en-us/dotnet/standard/security/vulnerabilities-cbc-mode)
+- [Cryptopals: Exploiting CBC Padding Oracles | NCC Group](https://www.nccgroup.com/research-blog/cryptopals-exploiting-cbc-padding-oracles/)
+- [Window: structuredClone() method - Web APIs | MDN](https://developer.mozilla.org/en-US/docs/Web/API/Window/structuredClone)
+- [Deep-copying in JavaScript using structuredClone | Articles | web.dev](https://web.dev/articles/structured-clone)
+- [SubtleCrypto - Web APIs | MDN](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto)
+- [Web Crypto API | Node.js v25.6.1 Documentation](https://nodejs.org/api/webcrypto.html)
+- [AbortSignal - Web APIs | MDN](https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal)
+- [Everything about the AbortSignals | Code Driven Development](https://codedrivendevelopment.com/posts/everything-about-abort-signal-timeout)
+- [The Node.js Event Loop, Timers, and process.nextTick() | Node.js](https://nodejs.org/en/docs/guides/event-loop-timers-and-nexttick)
+- [GitHub - mitchellh/libxev: libxev is a cross-platform, high-performance event loop](https://github.com/mitchellh/libxev)
+
+---
+
+*Pitfalls research for: Adding async fetch, crypto.subtle, structuredClone, tee(), and heap allocation to Zig+V8+xev runtime*
+*Researched: 2026-02-15*

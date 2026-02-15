@@ -1,420 +1,613 @@
-# Features Research: v1.2 Production Polish
+# Feature Landscape: Backlog Cleanup Phase
 
-**Domain:** JavaScript isolate runtime (WinterCG-aligned)
-**Researched:** 2026-02-02
-**Milestone:** v1.2 Production Polish
-**Confidence:** HIGH (verified against WinterTC spec, official docs, and platform implementations)
+**Domain:** JavaScript runtime API compatibility (Workers/Deno)
+**Researched:** 2026-02-15
+**Milestone:** Backlog cleanup (fixing known limitations, expanding APIs)
+**Confidence:** HIGH (verified against official Workers/Deno docs, V8 API specs, WHATWG standards)
 
 ## Executive Summary
 
-v1.2 targets three feature areas: WinterCG Streams API, graceful shutdown with connection draining, and per-app environment variables. Research confirms clear standards exist for all three. Streams has the most complexity due to WinterTC specification requirements. Graceful shutdown patterns are well-established across the ecosystem. Environment variable isolation is straightforward but requires careful security design.
+NANO's backlog contains five high-priority feature improvements targeting compatibility with Cloudflare Workers and Deno. Research confirms that async fetch() requires event loop integration; crypto.subtle needs algorithmic expansion in clear priority order; structuredClone uses V8's native Serializer/Deserializer; queueMicrotask integrates with V8's microtask queue; and performance.now() requires high-resolution timer binding. All are standard APIs with clear compatibility requirements. The main complexity lies in architectural integration—not API surface design.
 
 ---
 
-## Streams API (WinterCG/WinterTC)
+## Table Stakes vs Differentiators vs Anti-Features
 
-### Table Stakes
+Each backlog item maps to feature complexity and Workers compatibility expectations.
 
-These interfaces are **mandatory** per the [WinterTC Minimum Common Web API](https://min-common-api.proposal.wintertc.org/) specification. NANO must implement all of these for WinterCG alignment.
+### fetch() — Currently Synchronous/Blocking
 
-| Interface | Purpose | Complexity | Dependencies |
-|-----------|---------|------------|--------------|
-| **ReadableStream** | Consume data from a source (e.g., fetch response body) | HIGH | None |
-| **WritableStream** | Accept data as a destination | HIGH | None |
-| **TransformStream** | Modify data as it flows through | HIGH | ReadableStream, WritableStream |
-| **ReadableStreamDefaultReader** | Standard reading mechanism | MEDIUM | ReadableStream |
-| **ReadableStreamBYOBReader** | Bring-your-own-buffer reading | MEDIUM | ReadableStream |
-| **ReadableByteStreamController** | Controller for byte streams | MEDIUM | ReadableStream |
-| **ReadableStreamDefaultController** | Controller for default streams | MEDIUM | ReadableStream |
-| **ReadableStreamBYOBRequest** | BYOB request handling | LOW | ReadableStreamBYOBReader |
-| **WritableStreamDefaultWriter** | Standard writing mechanism | MEDIUM | WritableStream |
-| **WritableStreamDefaultController** | Controller for writable streams | MEDIUM | WritableStream |
-| **TransformStreamDefaultController** | Controller for transform streams | MEDIUM | TransformStream |
-| **ByteLengthQueuingStrategy** | Queuing strategy based on byte length | LOW | None |
-| **CountQueuingStrategy** | Queuing strategy based on chunk count | LOW | None |
+**Current state:** Works but blocks the event loop (synchronous HTTP).
+
+**Table Stakes:**
+- `async fetch()` with Promise<Response> — non-blocking HTTP required for Workers compatibility
+- Proper streaming request/response bodies (ReadableStream integration)
+- Automatic response decompression per fetch spec
+- SSRF protection (already exists, no changes needed)
+
+| Feature | Why Expected | Complexity | Priority | Status |
+|---------|--------------|------------|----------|--------|
+| Async fetch() | Workers spec requirement, essential for concurrent requests | HIGH | CRITICAL | Blocking |
+| Request body streaming | ReadableStream as request body | MEDIUM | HIGH | Depends on Streams |
+| Response body streaming | ReadableStream as response.body | MEDIUM | HIGH | Depends on Streams |
+| Automatic decompression | Per WHATWG fetch spec | MEDIUM | MEDIUM | Partial |
+| Abort signal support | Already implemented, but validate | LOW | MEDIUM | Needs testing |
+
+**Differentiators:**
+- Request/response interceptors (not standard, but useful)
+- Connection pooling (for performance)
+- Custom DNS resolver (advanced use case)
+
+**Anti-Features:**
+- Synchronous fetch() — document as unsupported
+- Fetch without timeout — enforce max timeout per request
+- Unbounded response buffering — stream or reject large responses
+
+**Why blocking:** NANO's current fetch is blocking because it uses synchronous Zig HTTP client. Event loop integration requires:
+1. Async I/O (libuv, xev integration)
+2. Promise integration with Zig HTTP calls
+3. Proper microtask checkpoint handling
+
+**Complexity Assessment:**
+- Architectural change: HIGH (integrate async I/O with V8 event loop)
+- API surface: LOW (standard fetch API already exposed)
+- Testing: MEDIUM (network-dependent, needs mock support)
 
 **Sources:**
-- [WinterTC Minimum Common API](https://min-common-api.proposal.wintertc.org/)
-- [WHATWG Streams Standard](https://streams.spec.whatwg.org/)
-- [Cloudflare Workers Streams](https://developers.cloudflare.com/workers/runtime-apis/streams/)
-
-#### Required Methods on ReadableStream
-
-Per [MDN ReadableStream documentation](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream):
-
-| Method | Purpose | Priority |
-|--------|---------|----------|
-| `cancel()` | Signal loss of interest, returns Promise | HIGH |
-| `getReader()` | Create reader, lock stream | HIGH |
-| `pipeTo(destination)` | Pipe to WritableStream with backpressure | HIGH |
-| `pipeThrough(transform)` | Chain through TransformStream | HIGH |
-| `tee()` | Split into two branches | MEDIUM |
-| `[Symbol.asyncIterator]()` | Enable `for await...of` | MEDIUM |
-
-**Note:** `pipeTo()` and `pipeThrough()` handle backpressure automatically per the WHATWG spec. Backpressure propagates backwards through the pipe chain when a destination cannot accept more data.
-
-#### Required Methods on WritableStream
-
-| Method | Purpose | Priority |
-|--------|---------|----------|
-| `getWriter()` | Create writer, lock stream | HIGH |
-| `close()` | Close the stream | HIGH |
-| `abort(reason)` | Abort the stream | HIGH |
-
-#### Constructor Callbacks (Underlying Source/Sink)
-
-**ReadableStream underlying source:**
-- `start(controller)` - Called by constructor, can enqueue initial chunks
-- `pull(controller)` - Called when queue is empty
-- `cancel(reason)` - Called when stream is canceled
-
-**WritableStream underlying sink:**
-- `start(controller)` - Called on construction
-- `write(chunk, controller)` - Called for each chunk
-- `close(controller)` - Called when closing
-- `abort(reason)` - Called on abort
-
-**TransformStream transformer:**
-- `start(controller)` - Called on construction
-- `transform(chunk, controller)` - Called for each chunk, use `controller.enqueue()`
-- `flush(controller)` - Called when all chunks processed
-
-### Differentiators
-
-Features that could give NANO an advantage over cloud platforms.
-
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **ReadableStream.from()** | Create stream from async iterable | LOW | Modern convenience API, [MDN docs](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream/from_static) |
-| **Native async iteration** | `for await (const chunk of stream)` | MEDIUM | Better DX than manual reader loop |
-| **TextEncoderStream / TextDecoderStream** | Streaming text encoding | MEDIUM | WinterCG includes these, useful for text processing |
-| **CompressionStream / DecompressionStream** | gzip/deflate streaming | MEDIUM | WinterCG mandates, useful for bandwidth |
-| **Direct Response body streaming** | `new Response(readableStream)` | HIGH | Already partially supported via fetch |
-
-**NANO-Specific Opportunity:** Since NANO runs on bare metal with direct file access, we could offer streaming file reads/writes more efficiently than edge platforms that must proxy through storage APIs.
-
-### Anti-Features
-
-Things to deliberately NOT implement or implement with restrictions.
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| **Unrestricted stream lifetime** | Streams that outlive the request handler leak memory | Tie stream lifecycle to request context |
-| **Unbounded internal queues** | Memory exhaustion in slow consumer scenarios | Enforce high water mark limits |
-| **Synchronous stream reads** | Blocks the isolate | All stream reads must be async |
-| **Streams outside request context** | Cloudflare explicitly limits Streams to request context | Document limitation, enforce at runtime |
-
-**Warning from Cloudflare:** "The Streams API is only available inside of the Request context." NANO should follow this pattern to prevent resource leaks.
-
-### Implementation Complexity Assessment
-
-| Component | Estimated LOC | Risk Level | Notes |
-|-----------|---------------|------------|-------|
-| ReadableStream core | 400-600 | HIGH | Most complex, many edge cases |
-| WritableStream core | 300-400 | MEDIUM | Simpler than ReadableStream |
-| TransformStream | 200-300 | MEDIUM | Combines Read+Write |
-| Controllers (4 types) | 400-500 | MEDIUM | State machine management |
-| Readers/Writers | 200-300 | LOW | Relatively straightforward |
-| Queuing strategies | 50-100 | LOW | Simple calculation |
-| Backpressure handling | 200-300 | HIGH | Critical for correctness |
-| **Total** | ~1800-2500 | HIGH | Significant undertaking |
-
-### Integration with Existing NANO Features
-
-| Existing Feature | Integration Point | Notes |
-|-----------------|-------------------|-------|
-| fetch() Response.body | Must return ReadableStream | Currently returns full body |
-| fetch() Request body | Should accept ReadableStream | For streaming uploads |
-| FormData | Uses Blob which uses ReadableStream | May need updates |
-| TextEncoder/TextDecoder | Used by TextEncoderStream/TextDecoderStream | Already implemented |
+- [Cloudflare Workers fetch()](https://developers.cloudflare.com/workers/runtime-apis/fetch/)
+- [WHATWG Fetch Standard](https://fetch.spec.whatwg.org/)
+- [Deno HTTP implementation](https://docs.deno.com/deploy/classic/api/runtime-fetch/)
 
 ---
 
-## Graceful Shutdown
+### crypto.subtle — Currently HMAC-Only
 
-### Table Stakes
+**Current state:** `digest()`, `sign()` (HMAC only), `verify()` (HMAC only).
 
-Behaviors users universally expect when a process or app is shutting down.
+**Missing:** RSA, ECDSA, AES, key generation, import/export, derivation, wrapping.
 
-| Behavior | Why Expected | Complexity | Notes |
-|----------|--------------|------------|-------|
-| **Handle SIGTERM** | Standard Unix shutdown signal | LOW | Process signal handling |
-| **Handle SIGINT** | Ctrl+C during development | LOW | Process signal handling |
-| **Stop accepting new connections** | Prevent new work during shutdown | LOW | `server.close()` equivalent |
-| **Drain in-flight requests** | Complete work already started | MEDIUM | Track active requests |
-| **Configurable timeout** | Force exit if drain takes too long | LOW | Typically 5-30 seconds |
-| **SIGKILL after timeout** | Guaranteed exit | LOW | Process terminates |
+**Table Stakes (Algorithm Priority):**
+
+Based on Workers and Deno implementations, prioritize algorithms in this order:
+
+| Priority | Algorithm Category | Algorithms | Usage |
+|----------|-------------------|-----------|-------|
+| **CRITICAL** | **Hashing** | SHA-256, SHA-384, SHA-512, SHA-1 | Foundation for all signatures |
+| **CRITICAL** | **HMAC** | HMAC with SHA-256, SHA-384, SHA-512 | JWT signing, message authentication |
+| **CRITICAL** | **RSA** | RSA-PSS (sign/verify), RSASSA-PKCS1-v1_5 | Key encryption, legacy JWT |
+| **CRITICAL** | **ECDSA** | ECDSA with SHA-256, SHA-384, SHA-512 | Modern signing, Web3 |
+| **HIGH** | **AES** | AES-GCM, AES-CBC | Symmetric encryption, common |
+| **HIGH** | **Elliptic Curves** | P-256, P-384, P-521 | ECDSA, ECDH key generation |
+| **MEDIUM** | **Key Derivation** | HKDF, PBKDF2 | Password hashing, KDF |
+| **MEDIUM** | **Key Management** | generateKey(), importKey(), exportKey() | Full crypto workflow |
+| **MEDIUM** | **EdDSA** | Ed25519 | Modern post-quantum alternative |
+| **LOW** | **AES-KW** | Key wrapping | Specialized use case |
+
+**Table Stakes Feature Breakdown:**
+
+| Method | Why Expected | Complexity | Notes |
+|--------|--------------|------------|-------|
+| `digest()` | SHA hashing — foundational | LOW | Already implemented (SHA-256/384/512/1) |
+| `generateKey()` | Create cryptographic keys | MEDIUM | Asymmetric (RSA, ECDSA) and symmetric (AES, HMAC) |
+| `importKey()` | Load keys from JWK/PKCS8/SPKI/raw | MEDIUM | Multiple formats, validation required |
+| `exportKey()` | Serialize keys to portable format | MEDIUM | Security-aware (extractable flag) |
+| `sign()` | RSA-PSS, ECDSA, HMAC (already have) | MEDIUM | Expand from current HMAC-only |
+| `verify()` | Signature verification | MEDIUM | Expand from current HMAC-only |
+| `encrypt()/decrypt()` | AES-GCM, AES-CBC, RSA-OAEP | MEDIUM | Symmetric and asymmetric |
+| `deriveBits()/deriveKey()` | HKDF, PBKDF2, ECDH | MEDIUM | Key derivation workflows |
+
+**Differentiators:**
+- `timingSafeEqual()` — constant-time comparison (Deno has this)
+- Post-quantum algorithms (ML-KEM, ML-DSA) — Node.js v24+ has these
+- ChaCha20-Poly1305 — modern AEAD
+- Scrypt — password hashing
+
+**Anti-Features:**
+- MD5 — deprecated, unless required for legacy interop
+- DES/3DES — broken, don't implement
+- Synchronous operations — all must be async Promises
+
+**Complexity Assessment (Phased):**
+
+Phase 1 (MVP):
+- Digest: SHA hashing (already done)
+- Sign/Verify: RSA-PSS, ECDSA with SHA-256 (expand existing)
+- Complexity: MEDIUM (200-300 LOC per algorithm family)
+
+Phase 2 (Encryption):
+- AES-GCM, AES-CBC
+- RSA-OAEP
+- Complexity: MEDIUM-HIGH (300-400 LOC)
+
+Phase 3 (Key Management + Derivation):
+- generateKey() for RSA, ECDSA, AES
+- importKey/exportKey with JWK support
+- HKDF, PBKDF2
+- Complexity: HIGH (400-500 LOC)
+
+**Why Zig crypto is sufficient:**
+- Zig std.crypto has all critical algorithms (SHA, HMAC, RSA, ECDSA, AES, HKDF, PBKDF2)
+- No external dependencies needed
+- Direct V8 binding possible
 
 **Sources:**
-- [Node.js Graceful Shutdown Best Practices](https://blog.risingstack.com/graceful-shutdown-node-js-kubernetes/)
-- [PM2 Graceful Shutdown](https://pm2.io/docs/runtime/best-practices/graceful-shutdown/)
-- [Bun Server Stop](https://bun.com/docs/runtime/http/server)
-
-#### Standard Shutdown Sequence
-
-Per industry best practices:
-
-```
-1. SIGTERM received
-2. Stop accepting new connections immediately
-3. Allow in-flight requests to complete (up to timeout)
-4. Close database connections, flush logs
-5. Exit process gracefully
-
-If timeout exceeded:
-6. Force close remaining connections
-7. Exit with non-zero status (optional)
-```
-
-#### Two Shutdown Contexts for NANO
-
-NANO has two distinct shutdown scenarios:
-
-| Context | Trigger | Scope | Notes |
-|---------|---------|-------|-------|
-| **App Removal** | Admin API DELETE or config change | Single app | Other apps continue running |
-| **Process Shutdown** | SIGTERM/SIGINT to main process | All apps | Full server shutdown |
-
-**App Removal Flow:**
-1. Mark app as "draining" - reject new requests with 503
-2. Wait for in-flight requests to that app to complete
-3. Destroy V8 isolate
-4. Remove from routing table
-
-**Process Shutdown Flow:**
-1. Stop accepting new connections on server socket
-2. Mark all apps as "draining"
-3. Wait for all in-flight requests across all apps
-4. Destroy all isolates
-5. Exit process
-
-### Differentiators
-
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **Per-app drain status** | Show which apps are draining via Admin API | LOW | Operational visibility |
-| **Configurable per-app timeout** | Different drain times per app | LOW | Some apps need longer |
-| **Pre-shutdown hooks** | Notify apps before shutdown | MEDIUM | `addEventListener('shutdown')` |
-| **Request count visibility** | `pendingRequests` per app | LOW | Like Bun's API |
-| **Zero-downtime app reload** | Remove + add atomically | MEDIUM | Already have hot reload |
-
-**NANO-Specific Opportunity:** Since NANO manages multiple apps, we can offer granular control over which apps drain and when, with per-app visibility through the Admin API.
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| **Immediate process.exit()** | Drops in-flight requests, loses data | Always drain first |
-| **Unlimited drain timeout** | Process hangs forever in Kubernetes | Cap at reasonable max (e.g., 5 min) |
-| **Silent shutdown** | No visibility into what's happening | Log shutdown events, provide hooks |
-| **Keep-alive connection leak** | Connections stay open preventing shutdown | Track and close keep-alive connections |
-
-**Critical Warning:** Keep-alive connections prevent `server.close()` from completing. Must track all connections and explicitly close them after timeout.
-
-### Integration with Existing NANO Features
-
-| Existing Feature | Integration Point | Notes |
-|-----------------|-------------------|-------|
-| Admin API DELETE /admin/apps | Should drain before removing | Currently removes immediately |
-| Admin API POST /admin/reload | Should drain changed apps | Currently reloads immediately |
-| Config file watcher | Removed apps should drain | Same as admin API |
-| Multi-app routing | Must track in-flight requests per app | New state needed |
+- [Cloudflare Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)
+- [Node.js Web Crypto API](https://nodejs.org/api/webcrypto.html)
+- [Deno SubtleCrypto](https://docs.deno.com/api/web/~/SubtleCrypto)
+- [MDN SubtleCrypto](https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto)
+- [WHATWG Web Crypto Standard](https://www.w3.org/TR/WebCryptoAPI/)
+- [Zig std.crypto documentation](https://ziglang.org/documentation/master/std/#std.crypto)
 
 ---
 
-## Per-App Environment Variables
+### structuredClone() — Not Yet Implemented
 
-### Table Stakes
+**Current state:** Missing entirely.
 
-Standard approach across all Workers-compatible platforms.
+**Table Stakes:**
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| **Config-defined env vars** | Define vars in config, not code | LOW | JSON/TOML config |
-| **Access via env object** | `env.MY_VAR` in handler | LOW | Passed to fetch handler |
-| **String values** | Simple key-value strings | LOW | Basic requirement |
-| **Complete isolation** | App A cannot see App B's vars | LOW | Separate env objects per isolate |
-| **Local development override** | `.env` file for local vars | LOW | Standard DX pattern |
+| Feature | Why Expected | Complexity | Priority |
+|---------|--------------|------------|----------|
+| `structuredClone(value)` | Deep cloning with spec compliance | MEDIUM | HIGH |
+| Support for Object, Array, primitives | Core types | LOW | CRITICAL |
+| Support for TypedArray, ArrayBuffer | Binary data | LOW | CRITICAL |
+| Support for Map, Set, Date, Error | Container types | MEDIUM | HIGH |
+| Support for Blob, File, FormData | Web API types | MEDIUM | MEDIUM |
+| Circular reference handling | Self-referential objects | MEDIUM | HIGH |
+| `transferList` parameter | Optional transfer semantics | LOW | LOW |
+
+**Spec Compliance:**
+
+structuredClone follows the [HTML specification](https://html.spec.whatwg.org/multipage/structured-data.html#structuredclone), which defines what can/cannot be cloned:
+
+**Cloneable (Table Stakes):**
+- Primitive types: undefined, null, boolean, number, string, bigint, symbol
+- Object, Array
+- TypedArray (all variants), ArrayBuffer, DataView
+- Map, Set
+- Date, Error, RegExp
+- Blob (Deno/Workers support)
+- FormData (Workers support)
+
+**Not Cloneable (Important to reject gracefully):**
+- Function (must throw)
+- DOM nodes (not applicable in worker context)
+- WeakMap, WeakSet (not applicable)
+
+**Differentiators:**
+- Custom clone behavior via serialization hooks (not standard)
+- Async cloning (not standard, but useful for large objects)
+
+**Anti-Features:**
+- Shallow cloning — explicitly not structuredClone
+- Synchronous cloning of large objects — may block, but acceptable for stdlib
+- Silent failures on unclonable types — must throw TypeError
+
+**Implementation via V8 Serializer/Deserializer:**
+
+V8 provides native support through C++ API:
+- `v8::ValueSerializer` — encode value to binary format
+- `v8::ValueDeserializer` — decode from binary format
+- Full HTML Structured Clone Algorithm compliance
+- Used internally for `postMessage()`, Workers `waitUntil()`, etc.
+
+**Zig Binding Approach:**
+
+Option 1 (Recommended): Direct V8 Serializer binding
+```zig
+// Pseudocode
+const serializer = v8.ValueSerializer.new(isolate);
+serializer.writeValue(context, value);
+const buffer = serializer.releaseBuffer();
+
+const deserializer = v8.ValueDeserializer.new(isolate, buffer);
+const cloned = deserializer.readValue(context);
+```
+
+Option 2: Implement in JavaScript (simpler but slower)
+- Recursive walk and object reconstruction
+- Less efficient, but works for MVP
+
+**Complexity Assessment:**
+- Direct V8 binding: LOW (100-150 LOC Zig + V8 API calls)
+- JavaScript polyfill: MEDIUM (200-300 LOC JS)
+- Testing: MEDIUM (type coverage, circular refs, edge cases)
+
+**Why critical for Workers compatibility:**
+- Used in Worker request/response handling
+- Expected by developers porting from Workers
+- Standard library assumption in many frameworks
 
 **Sources:**
-- [Cloudflare Workers Environment Variables](https://developers.cloudflare.com/workers/configuration/environment-variables/)
-- [Deno Deploy Environment Variables](https://docs.deno.com/deploy/reference/env_vars_and_contexts/)
-- [Vercel Edge Runtime](https://vercel.com/docs/functions/runtimes/edge)
+- [HTML Structured Clone Algorithm](https://html.spec.whatwg.org/multipage/structured-data.html#structuredclone)
+- [MDN structuredClone](https://developer.mozilla.org/en-US/docs/Web/API/structuredClone)
+- [V8 ValueSerializer API](https://v8.github.io/api/head/v8-value-serializer_8h.html)
+- [Node.js v8.serialize()](https://nodejs.org/api/v8.html#v8_v8_serialize_value)
 
-#### Cloudflare Workers Pattern
+---
 
-```toml
-# wrangler.toml
-[vars]
-API_HOST = "https://api.example.com"
-API_VERSION = "v2"
+### queueMicrotask() — Not Yet Implemented
+
+**Current state:** Missing entirely.
+
+**Table Stakes:**
+
+| Feature | Why Expected | Complexity | Priority |
+|---------|--------------|------------|----------|
+| `queueMicrotask(callback)` | Schedule callback before next macrotask | LOW | MEDIUM |
+| Execution in microtask queue | FIFO ordering, runs before setTimeout | LOW | CRITICAL |
+| Nestable (queueMicrotask within queueMicrotask) | Recursive microtask queueing | LOW | HIGH |
+| Works with async/await | Part of Promise machinery | LOW | CRITICAL |
+| No return value | Void function | LOW | CRITICAL |
+
+**Spec Compliance:**
+
+Per [HTML specification](https://html.spec.whatwg.org/multipage/webappapis.html#queueing-a-microtask):
+
 ```
+queueMicrotask() adds callback to the microtask queue.
+Microtasks execute:
+1. After the current script (same macrotask)
+2. After all currently-queued microtasks
+3. Before the next macrotask (setTimeout, etc.)
+
+Event loop pseudocode:
+while (hasEvents) {
+  task = macrotaskQueue.pop()
+  execute(task)
+
+  while (microtaskQueue.hasItems()) {
+    microtask = microtaskQueue.pop()
+    execute(microtask)
+  }
+
+  if (needsRendering) render()
+}
+```
+
+**Why it matters:**
+- Promise.then() callbacks are microtasks (V8 already handles via MicrotaskQueue)
+- queueMicrotask() exposes this for user code
+- Async/await depends on this ordering
+- Some React/Vue patterns rely on queueMicrotask()
+
+**V8 Integration:**
+
+V8 has `v8::Isolate::EnqueueMicrotask()`:
+```cpp
+// Add callback to current isolate's microtask queue
+isolate->EnqueueMicrotask(fn);
+
+// Process all queued microtasks
+isolate->PerformCheckpoint(isolate->GetCurrentContext());
+```
+
+**Zig Binding Approach:**
+
+```zig
+pub fn queueMicrotaskCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
+    const ctx = js.CallbackContext.init(raw_info);
+
+    if (ctx.argc() < 1) {
+        js.throw(ctx.isolate, "queueMicrotask requires a function argument");
+        return;
+    }
+
+    const callback = ctx.arg(0);
+    if (!callback.isFunction()) {
+        js.throw(ctx.isolate, "queueMicrotask argument must be a function");
+        return;
+    }
+
+    // Wrap callback to call it with no arguments
+    const wrapped = createCallableWrapper(ctx.isolate, callback);
+    ctx.isolate.enqueueMicrotask(wrapped);
+}
+```
+
+**Complexity Assessment:**
+- Binding: LOW (50-100 LOC Zig)
+- Testing: MEDIUM (timing-dependent, race conditions)
+- Integration: LOW (purely additive, no event loop changes needed)
+
+**Current NANO State:**
+- V8 event loop already uses MicrotaskQueue (for Promises)
+- Event loop checkpoint happens after macrotasks
+- Just need to expose EnqueueMicrotask to JavaScript
+
+**Anti-Features:**
+- Synchronous callback execution — must be asynchronous
+- Callback with arguments — standard spec takes no args
+
+**Sources:**
+- [HTML queueMicrotask specification](https://html.spec.whatwg.org/multipage/webappapis.html#queueing-a-microtask)
+- [MDN queueMicrotask](https://developer.mozilla.org/en-US/docs/Web/API/queueMicrotask)
+- [V8 MicrotaskQueue API](https://v8docs.nodesource.com/node-12.0/db/d08/classv8_1_1_microtask_queue.html)
+- [JavaScript.info: Microtasks](https://javascript.info/microtask-queue)
+
+---
+
+### performance.now() — Not Yet Implemented
+
+**Current state:** Missing entirely.
+
+**Table Stakes:**
+
+| Feature | Why Expected | Complexity | Priority |
+|---------|--------------|-----------|----------|
+| `performance.now()` | High-resolution timestamp in milliseconds | LOW | MEDIUM |
+| Returns DOMHighResTimeStamp (float) | Milliseconds with fractional precision | LOW | CRITICAL |
+| Monotonic increasing | Never decreases, unaffected by system clock | LOW | CRITICAL |
+| Relative to timeOrigin | Starts from page load (or arbitrary point in NANO) | LOW | HIGH |
+| Microsecond resolution (ideal) | 5µs precision if possible, else 1ms | LOW | MEDIUM |
+
+**Spec Compliance:**
+
+Per [W3C High Resolution Time Standard](https://www.w3.org/TR/hr-time/):
 
 ```javascript
-export default {
-  async fetch(request, env, ctx) {
-    // env.API_HOST, env.API_VERSION available here
-  }
+performance.now() // => 1234.567890 (milliseconds)
+
+// Properties:
+performance.timeOrigin   // => timestamp when context was created
+// now() is relative to timeOrigin
+performance.now() >= 0   // Always true
+```
+
+**Why it matters:**
+- Benchmarking code
+- Frame timing measurements
+- Request latency tracking
+- Standard in all JavaScript runtimes
+
+**NANO Implementation Strategy:**
+
+Two approaches:
+
+**Option 1: Relative to script start (Recommended)**
+```zig
+const start_time = std.time.nanoTimestamp(); // When context created
+const now_nanos = std.time.nanoTimestamp();
+const elapsed_ms = @as(f64, @floatFromInt(now_nanos - start_time)) / 1_000_000.0;
+```
+
+**Option 2: Relative to process start**
+```zig
+// Less accurate for request timing, but works
+const elapsed_ms = getElapsedMsSinceProcessStart();
+```
+
+**timeOrigin setup:**
+- Set timeOrigin to context creation time
+- Expose `performance.timeOrigin` as a timestamp
+- Document that timeOrigin is relative to isolate creation, not Unix epoch
+
+**V8 Integration:**
+
+V8's `v8::Date::Now()` returns milliseconds since epoch with high precision:
+```cpp
+double now_ms = v8::Date::Now(isolate);
+```
+
+But for timeOrigin-relative timing, better to use system clock directly.
+
+**Zig Binding Approach:**
+
+```zig
+var g_context_start_nanos: i128 = 0; // Per-context
+
+pub fn performanceNowCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
+    const ctx = js.CallbackContext.init(raw_info);
+
+    const now_nanos = std.time.nanoTimestamp();
+    const elapsed_nanos = now_nanos - g_context_start_nanos;
+    const elapsed_ms = @as(f64, @floatFromInt(elapsed_nanos)) / 1_000_000.0;
+
+    const result = v8.Number.initDouble(ctx.isolate, elapsed_ms);
+    js.ret(ctx, result);
 }
 ```
 
-#### NANO Config Pattern (Proposed)
+**Complexity Assessment:**
+- Binding: LOW (50-100 LOC Zig)
+- Testing: MEDIUM (timing assertions, precision checks)
+- Integration: LOW (purely additive)
 
-```json
-{
-  "apps": [
-    {
-      "hostname": "api.example.com",
-      "path": "./apps/api",
-      "env": {
-        "DATABASE_URL": "postgres://...",
-        "API_KEY": "secret123"
-      }
-    }
-  ]
-}
-```
+**Why simple:**
+- No dependencies on event loop
+- No state machine needed
+- Just arithmetic on system time
 
-### Differentiators
+**Anti-Features:**
+- `performance.mark()/measure()` — defer to later phase (not critical)
+- `performance.getEntriesByType()` — not needed for MVP
+- Configurable precision — use system precision as-is
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **JSON values** | Objects/arrays in env, not just strings | LOW | Cloudflare supports this |
-| **Secrets vs vars distinction** | Encrypted vs plaintext | MEDIUM | Important for security |
-| **Environment-specific files** | `.env.production`, `.env.development` | LOW | Common DX pattern |
-| **Admin API env management** | GET/PUT env vars at runtime | MEDIUM | Hot-update without reload |
-| **Env var validation** | Schema validation on load | LOW | Fail fast on missing required vars |
-| **process.env compatibility** | `process.env.VAR` access | LOW | Node.js compat flag |
-
-**NANO-Specific Opportunity:** Since NANO has full Admin API, we can offer runtime env var updates without app restart - something edge platforms typically don't support.
-
-### Anti-Features
-
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| **Global process.env** | Cross-app leakage risk | Isolated env object per app |
-| **Env vars in code** | Secrets in git | Config file or Admin API |
-| **No secrets distinction** | Sensitive values logged/exposed | Redact in logs, separate handling |
-| **Mutable env at runtime from app code** | Confusing state | Env is read-only from app perspective |
-
-**Security Warning:** Per [Cloudflare docs](https://developers.cloudflare.com/workers/configuration/secrets/): "Do not use vars to store sensitive information. Use secrets instead."
-
-### Implementation Considerations
-
-| Consideration | Approach | Notes |
-|---------------|----------|-------|
-| **Storage location** | Config JSON, separate secrets file | Keep secrets out of main config |
-| **Memory isolation** | Each isolate gets copy of its env | No shared references |
-| **Admin API access** | Auth required for env management | Prevent unauthorized access |
-| **Logging** | Redact env values in logs | Prevent secret leakage |
-| **Hot reload** | Env changes apply on next request | Don't restart isolate |
-
-### Integration with Existing NANO Features
-
-| Existing Feature | Integration Point | Notes |
-|-----------------|-------------------|-------|
-| Config parser | Add `env` field per app | Extend existing parser |
-| V8 isolate creation | Inject env object into context | At isolate setup |
-| Admin API | Add GET/PUT /admin/apps/:hostname/env | New endpoints |
-| Logging | Redact env values | Sanitization layer |
+**Sources:**
+- [W3C High Resolution Time API](https://www.w3.org/TR/hr-time-3/)
+- [MDN Performance.now()](https://developer.mozilla.org/en-US/docs/Web/API/Performance/now)
+- [Cloudflare Workers performance API](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/#performance)
+- [Deno performance API](https://docs.deno.com/api/web/~/Performance)
 
 ---
 
-## Feature Dependencies Matrix
+## Dependency Graph
 
-Understanding dependencies for phase ordering.
+Understanding what needs to be done in which order:
 
 ```
-Streams API
-  |-> fetch() Response.body (streams enable streaming responses)
-  |-> TextEncoder/TextDecoder (already implemented)
-  |-> AbortController (already implemented)
+Microtask Queue (V8 already has this)
+    ↓
+queueMicrotask()
+    ↓
+Promise handling (already works)
 
-Graceful Shutdown
-  |-> Admin API (already implemented)
-  |-> Multi-app routing (already implemented)
-  |-> NEW: Request tracking per app
+System Clock API
+    ↓
+performance.now()
 
-Per-App Env Vars
-  |-> Config parser (already implemented)
-  |-> V8 isolate setup (already implemented)
-  |-> Admin API (already implemented)
+V8 Serializer/Deserializer
+    ↓
+structuredClone()
+
+Event Loop + Async I/O runtime (xev/tokio-like)
+    ↓
+async fetch()
+
+Zig crypto libraries + V8 bindings
+    ↓
+crypto.subtle (RSA, ECDSA, AES, etc.)
+    ↓
+Full Web Crypto compatibility
 ```
 
-### Recommended Implementation Order
-
-1. **Per-App Environment Variables** (Lowest complexity, no dependencies)
-   - Extend config parser
-   - Inject env object into isolate
-   - Add Admin API endpoints
-
-2. **Graceful Shutdown** (Medium complexity, needs request tracking)
-   - Add in-flight request tracking
-   - Implement drain logic for app removal
-   - Implement process shutdown handling
-
-3. **Streams API** (Highest complexity, largest scope)
-   - Start with ReadableStream core
-   - Add WritableStream
-   - Add TransformStream
-   - Integrate with fetch() Response.body
+**No dependencies between items** — can be implemented in any order except:
+- `async fetch()` requires event loop refactoring (may impact other code)
+- `crypto.subtle` expansion can happen independently
+- `structuredClone`, `queueMicrotask`, `performance.now()` are purely additive
 
 ---
 
-## Resource Limits for New Features
+## Implementation Complexity Summary
 
-| Resource | Recommendation | Rationale |
-|----------|----------------|-----------|
-| **Stream buffer size** | 64KB high water mark | Balance memory vs throughput |
-| **Drain timeout** | 30 seconds default | Long enough for most requests |
-| **Max env vars per app** | 128 | Match Cloudflare paid tier |
-| **Max env value size** | 5KB | Prevent abuse, sufficient for tokens |
+| Feature | LOC | Risk | Duration | Notes |
+|---------|-----|------|----------|-------|
+| **queueMicrotask()** | 50-100 | LOW | 2-4 hours | V8 API exposure |
+| **performance.now()** | 50-100 | LOW | 2-4 hours | System time binding |
+| **structuredClone()** | 100-200 | MEDIUM | 4-8 hours | V8 Serializer usage |
+| **crypto.subtle (Phase 1: RSA/ECDSA)** | 300-400 | MEDIUM | 1-2 weeks | Algorithm implementation |
+| **crypto.subtle (Phase 2: AES/encryption)** | 300-400 | MEDIUM | 1-2 weeks | More algorithms |
+| **crypto.subtle (Phase 3: Key mgmt)** | 400-500 | MEDIUM-HIGH | 2-3 weeks | Complex workflows |
+| **async fetch()** | 500-800 | HIGH | 2-4 weeks | Event loop integration |
+
+**Total MVP (queueMicrotask + performance.now + structuredClone + crypto Phase 1):**
+~500-800 LOC, 3-4 weeks
 
 ---
 
-## Sources
+## Feature Priorities for Backlog Cleanup
 
-### WinterCG/WinterTC
-- [WinterTC Minimum Common Web API](https://min-common-api.proposal.wintertc.org/)
-- [WinterTC FAQ](https://wintertc.org/faq)
-- [WinterCG to WinterTC Transition](https://www.w3.org/community/wintercg/2025/01/10/goodbye-wintercg-welcome-wintertc/)
+Based on impact/effort:
 
-### Streams Specification
-- [WHATWG Streams Standard](https://streams.spec.whatwg.org/)
-- [MDN ReadableStream](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream)
-- [MDN WritableStream](https://developer.mozilla.org/en-US/docs/Web/API/WritableStream)
-- [MDN TransformStream](https://developer.mozilla.org/en-US/docs/Web/API/TransformStream)
-- [web.dev Streams Guide](https://web.dev/articles/streams)
+| Rank | Feature | Effort | Impact | MVP | Rationale |
+|------|---------|--------|--------|-----|-----------|
+| 1 | `queueMicrotask()` | LOW | MEDIUM | YES | Quick win, enables Promise patterns |
+| 2 | `performance.now()` | LOW | MEDIUM | YES | Quick win, common in benchmarks |
+| 3 | `structuredClone()` | MEDIUM | MEDIUM | YES | Standard library, some frameworks expect |
+| 4 | `crypto.subtle` Phase 1 (RSA/ECDSA) | MEDIUM | HIGH | YES | Workers compatibility, critical for auth |
+| 5 | `crypto.subtle` Phase 2 (AES) | MEDIUM | HIGH | NO | Encryption, important but not urgent |
+| 6 | `async fetch()` | HIGH | CRITICAL | NO | Architectural change, highest impact |
+| 7 | `crypto.subtle` Phase 3 (Key mgmt) | MEDIUM-HIGH | MEDIUM | NO | Advanced workflows |
 
-### Platform Implementations
-- [Cloudflare Workers Streams](https://developers.cloudflare.com/workers/runtime-apis/streams/)
-- [Cloudflare Workers Environment Variables](https://developers.cloudflare.com/workers/configuration/environment-variables/)
-- [Cloudflare Workers Secrets](https://developers.cloudflare.com/workers/configuration/secrets/)
-- [Cloudflare Workers Context (waitUntil)](https://developers.cloudflare.com/workers/runtime-apis/context/)
-- [Cloudflare waitUntil Import](https://developers.cloudflare.com/changelog/2025-08-08-add-waituntil-cloudflare-workers/)
-- [Deno Environment Variables](https://docs.deno.com/runtime/reference/env_variables/)
-- [Vercel Edge Runtime](https://vercel.com/docs/functions/runtimes/edge)
-- [Vercel Edge Config](https://vercel.com/docs/edge-config)
-- [Bun Server API](https://bun.com/docs/runtime/http/server)
+**Recommended MVP for immediate backlog:** #1-4
 
-### Graceful Shutdown
-- [Node.js Graceful Shutdown with Kubernetes](https://blog.risingstack.com/graceful-shutdown-node-js-kubernetes/)
-- [PM2 Graceful Shutdown](https://pm2.io/docs/runtime/best-practices/graceful-shutdown/)
-- [Hono + Bun Graceful Shutdown Discussion](https://github.com/orgs/honojs/discussions/3731)
-- [Cloudflare Containers Lifecycle](https://developers.cloudflare.com/containers/platform-details/architecture/)
+---
 
-### Security Model
-- [Cloudflare Workers Security Model](https://developers.cloudflare.com/workers/reference/security-model/)
-- [V8 Isolates and Edge Runtime](https://medium.com/@jade.awesome.fisher/edge-runtime-its-not-magic-it-s-v8-isolates-c07c7547bea2)
+## Testing Strategy
+
+| Feature | Testing Approach | Test Vectors |
+|---------|------------------|--------------|
+| `queueMicrotask()` | Event loop ordering (microtask vs macrotask) | Test nesting, Promise interaction |
+| `performance.now()` | Monotonic increase, relative timing | Measure elapsed time, confirm no regression |
+| `structuredClone()` | Type coverage, circular refs, error cases | TypedArray, Map/Set, recursive objects |
+| `crypto.subtle` | Algorithm verification, interop | Known test vectors (NIST, RFC), compare with openssl |
+| `async fetch()` | Network simulation, promise chains | Mock HTTP responses, timeout handling |
+
+**Sources for test vectors:**
+- [NIST CAVP Test Vectors](https://csrc.nist.gov/projects/cryptographic-algorithm-validation-program/)
+- [RFC 3394 (AES-KW)](https://tools.ietf.org/html/rfc3394)
+- [RFC 5869 (HKDF)](https://tools.ietf.org/html/rfc5869)
+
+---
+
+## Workers Compatibility Checklist
+
+These features are verified against Cloudflare Workers API surface:
+
+- [x] `fetch()` — async, Promise-based
+- [x] `crypto.subtle.digest()` — SHA-256, SHA-384, SHA-512, SHA-1
+- [x] `crypto.subtle.sign()` — RSA-PSS, ECDSA, HMAC (HMAC done, expand)
+- [x] `crypto.subtle.verify()` — RSA-PSS, ECDSA, HMAC (HMAC done, expand)
+- [x] `crypto.subtle.generateKey()` — RSA, ECDSA, AES, HMAC
+- [x] `crypto.subtle.importKey()` — JWK, PKCS8, SPKI, raw
+- [x] `crypto.subtle.exportKey()` — JWK, PKCS8, SPKI, raw
+- [x] `crypto.subtle.encrypt()/decrypt()` — AES-GCM, RSA-OAEP
+- [x] `crypto.getRandomValues()` — Already implemented
+- [x] `crypto.randomUUID()` — Already implemented
+- [x] `structuredClone()` — Clone values, circular refs
+- [x] `queueMicrotask()` — Schedule async work
+- [x] `performance.now()` — High-resolution timer
 
 ---
 
 ## Confidence Assessment
 
-| Area | Level | Rationale |
-|------|-------|-----------|
-| Streams API Spec | HIGH | Verified against WinterTC and WHATWG specs |
-| Graceful Shutdown | HIGH | Well-established patterns across ecosystem |
-| Per-App Env Vars | HIGH | Standard approach across all platforms |
-| Implementation Complexity | MEDIUM | Estimates based on spec complexity |
-| Integration Points | HIGH | Based on existing NANO codebase review |
+| Area | Confidence | Notes |
+|------|-----------|-------|
+| API specifications | HIGH | WHATWG, W3C standards verified |
+| V8 integration | HIGH | V8 API documented, used in Node.js |
+| Zig crypto libraries | HIGH | std.crypto covers all algorithms |
+| Event loop integration | MEDIUM | NANO's event loop needs review for async I/O |
+| Testing strategy | MEDIUM | Timing-dependent tests can be flaky |
+| Workers compatibility | HIGH | Verified against official docs |
+
+---
+
+## Gaps & Open Questions
+
+1. **async fetch() event loop:** How to integrate with current xev-based event loop? Requires investigation of pending I/O handling.
+2. **crypto.subtle key formats:** Full JWK serialization — JSON format complexity, edge cases?
+3. **structuredClone() custom serialization:** Should we support Symbol-based serialization hooks (non-standard)?
+4. **performance.now() precision:** Can we guarantee microsecond precision, or document millisecond limit?
+5. **crypto.subtle post-quantum:** Future-proof for ML-KEM/ML-DSA, or stick to current algorithms?
+
+---
+
+## Sources
+
+### Official Documentation
+- [Cloudflare Workers Runtime APIs](https://developers.cloudflare.com/workers/runtime-apis/)
+- [Deno API Reference](https://docs.deno.com/api/)
+- [Node.js Web Crypto API](https://nodejs.org/api/webcrypto.html)
+
+### Web Standards
+- [WHATWG Fetch Standard](https://fetch.spec.whatwg.org/)
+- [W3C Web Crypto API](https://www.w3.org/TR/WebCryptoAPI/)
+- [HTML Structured Clone Algorithm](https://html.spec.whatwg.org/multipage/structured-data.html)
+- [HTML Microtask Queue](https://html.spec.whatwg.org/multipage/webappapis.html#queueing-a-microtask)
+- [W3C High Resolution Time API](https://www.w3.org/TR/hr-time-3/)
+
+### V8 API
+- [V8 ValueSerializer](https://v8.github.io/api/head/v8-value-serializer_8h.html)
+- [V8 MicrotaskQueue](https://v8docs.nodesource.com/node-12.0/db/d08/classv8_1_1_microtask_queue.html)
+- [V8 Date::Now()](https://v8docs.nodesource.com/node-12.0/dd/d98/classv8_1_1_date.html)
+
+### Implementation References
+- [Node.js async fetch implementation (uses libuv)](https://github.com/nodejs/node/blob/main/lib/internal/modules/esm/loader.js)
+- [Deno fetch (uses Tokio)](https://github.com/denoland/deno/blob/main/ext/fetch/lib.rs)
+- [Cloudflare Workers 2025 Node.js HTTP support](https://blog.cloudflare.com/nodejs-workers-2025/)
+- [ungap/structured-clone polyfill](https://github.com/ungap/structured-clone)
+
+### Zig Crypto
+- [Zig std.crypto documentation](https://ziglang.org/documentation/master/std/#std.crypto)
+- [Zig std.crypto.hash](https://ziglang.org/documentation/master/std/#std.crypto.hash)
+
+---
+
+## Recommendation
+
+**MVP Backlog Cleanup (3-4 weeks):**
+1. Implement `queueMicrotask()` (quick, high-value)
+2. Implement `performance.now()` (quick, common)
+3. Implement `structuredClone()` (medium effort, standard library)
+4. Expand `crypto.subtle` with RSA and ECDSA (highest impact for auth flows)
+
+**Phase 2 (2-3 weeks after MVP):**
+5. Add AES encryption to crypto.subtle
+6. Add key generation/import/export
+
+**Phase 3 (Separate architectural effort):**
+7. Refactor event loop for async I/O
+8. Implement `async fetch()`
+
+This allows developers to port more Workers code to NANO immediately (MVP) while async fetch is tackled as a separate architectural project.
