@@ -8,6 +8,19 @@ NANO is an ultra-dense JavaScript runtime that hosts multiple applications in a 
 
 **Skip the container fleet entirely.** One NANO process replaces dozens of Node containers, their image builds, fleet management, and routing infrastructure — while maintaining isolation between apps.
 
+## Current Milestone: v1.3 Backlog Cleanup
+
+**Goal:** Fix all known limitations from v1.0-v1.2 — heap buffers, async fetch, streams fixes, crypto expansion, WinterCG essentials, and URL setters.
+
+**Target features:**
+- Heap-allocated buffers replacing all stack buffer limits (B-01)
+- Async fetch() that doesn't block the event loop (B-02)
+- WritableStream async sink support (B-03)
+- crypto.subtle expansion: AES-GCM, RSA-PSS, ECDSA, key import/export (B-04)
+- ReadableStream.tee() spec-compliant branch queuing (B-05)
+- WinterCG essentials: structuredClone, queueMicrotask, performance.now (B-06)
+- URL mutable properties with setters (B-08)
+
 ## Current State (v1.2 Shipped)
 
 **Version:** v1.2 Production Polish (shipped 2026-02-09)
@@ -76,6 +89,16 @@ See BACKLOG.md for full details and suggested approaches.
 - Graceful shutdown with connection draining — v1.2
 - API spec compliance (getter properties, Headers fixes, binary data) — v1.2
 - Documentation website (Astro + Starlight, 34 pages) — v1.2
+
+### Active (v1.3)
+
+- [ ] Heap-allocated buffers for all APIs (replacing stack limits)
+- [ ] Async fetch() integrated with xev event loop
+- [ ] WritableStream async sink support
+- [ ] crypto.subtle: AES-GCM, RSA-PSS, ECDSA, key management
+- [ ] ReadableStream.tee() with per-branch queuing
+- [ ] WinterCG essentials: structuredClone, queueMicrotask, performance.now
+- [ ] URL mutable properties (pathname, search, hash setters)
 
 ### Future (v2 candidates)
 
@@ -171,4 +194,4 @@ See BACKLOG.md for full details and suggested approaches.
 </details>
 
 ---
-*Last updated: 2026-02-09 after v1.2 milestone completion*
+*Last updated: 2026-02-15 after v1.3 milestone start*
