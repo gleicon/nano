@@ -51,8 +51,14 @@ fn writeArgs(raw_info: ?*const v8.C_FunctionCallbackInfo, fd: std.posix.fd_t, pr
 fn writeValue(file: std.fs.File, isolate: v8.Isolate, context: v8.Context, value: v8.Value) void {
     if (value.isString()) {
         const str = value.toString(context) catch return;
-        var buf: [4096]u8 = undefined;
-        file.writeAll(js.readString(isolate, str, &buf)) catch {};
+        const str_len = str.lenUtf8(isolate);
+        var stack_buf: [4096]u8 = undefined;
+        const heap_buf = if (str_len > 4096)
+            std.heap.page_allocator.alloc(u8, str_len) catch return
+        else
+            null;
+        defer if (heap_buf) |buf| std.heap.page_allocator.free(buf);
+        file.writeAll(js.readString(isolate, str, if (heap_buf) |buf| buf else &stack_buf)) catch {};
     } else if (value.isNumber()) {
         const str = value.toString(context) catch return;
         var buf: [64]u8 = undefined;
@@ -83,22 +89,40 @@ fn writeValue(file: std.fs.File, isolate: v8.Isolate, context: v8.Context, value
                 file.writeAll("[object]") catch {};
                 return;
             };
-            var buf: [4096]u8 = undefined;
-            file.writeAll(js.readString(isolate, str, &buf)) catch {};
+            const fb_len = str.lenUtf8(isolate);
+            var fb_stack_buf: [4096]u8 = undefined;
+            const fb_heap_buf = if (fb_len > 4096)
+                std.heap.page_allocator.alloc(u8, fb_len) catch return
+            else
+                null;
+            defer if (fb_heap_buf) |buf| std.heap.page_allocator.free(buf);
+            file.writeAll(js.readString(isolate, str, if (fb_heap_buf) |buf| buf else &fb_stack_buf)) catch {};
             return;
         };
         const result_str = result.toString(context) catch {
             file.writeAll("[object]") catch {};
             return;
         };
-        var buf: [4096]u8 = undefined;
-        file.writeAll(js.readString(isolate, result_str, &buf)) catch {};
+        const rs_len = result_str.lenUtf8(isolate);
+        var rs_stack_buf: [4096]u8 = undefined;
+        const rs_heap_buf = if (rs_len > 4096)
+            std.heap.page_allocator.alloc(u8, rs_len) catch return
+        else
+            null;
+        defer if (rs_heap_buf) |buf| std.heap.page_allocator.free(buf);
+        file.writeAll(js.readString(isolate, result_str, if (rs_heap_buf) |buf| buf else &rs_stack_buf)) catch {};
     } else {
         const str = value.toString(context) catch {
             file.writeAll("[object]") catch {};
             return;
         };
-        var buf: [4096]u8 = undefined;
-        file.writeAll(js.readString(isolate, str, &buf)) catch {};
+        const el_len = str.lenUtf8(isolate);
+        var el_stack_buf: [4096]u8 = undefined;
+        const el_heap_buf = if (el_len > 4096)
+            std.heap.page_allocator.alloc(u8, el_len) catch return
+        else
+            null;
+        defer if (el_heap_buf) |buf| std.heap.page_allocator.free(buf);
+        file.writeAll(js.readString(isolate, str, if (el_heap_buf) |buf| buf else &el_stack_buf)) catch {};
     }
 }

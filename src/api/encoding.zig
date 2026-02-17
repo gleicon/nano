@@ -36,8 +36,18 @@ fn atobCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    var input_buf: [8192]u8 = undefined;
-    const input = js.readString(ctx.isolate, str, &input_buf);
+    // Stack+heap fallback for input buffer
+    const str_len = str.lenUtf8(ctx.isolate);
+    var stack_input_buf: [8192]u8 = undefined;
+    const heap_input_buf = if (str_len > 8192)
+        std.heap.page_allocator.alloc(u8, str_len) catch {
+            js.throw(ctx.isolate, "atob: out of memory");
+            return;
+        }
+    else
+        null;
+    defer if (heap_input_buf) |buf| std.heap.page_allocator.free(buf);
+    const input = js.readString(ctx.isolate, str, if (heap_input_buf) |buf| buf else &stack_input_buf);
 
     const decoder = std.base64.standard.Decoder;
     const decoded_size = decoder.calcSizeForSlice(input) catch {
@@ -45,18 +55,24 @@ fn atobCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    var output_buf: [8192]u8 = undefined;
-    if (decoded_size > output_buf.len) {
-        js.throw(ctx.isolate, "atob: input too long");
-        return;
-    }
+    // Stack+heap fallback for output buffer
+    var stack_output_buf: [8192]u8 = undefined;
+    const heap_output_buf = if (decoded_size > 8192)
+        std.heap.page_allocator.alloc(u8, decoded_size) catch {
+            js.throw(ctx.isolate, "atob: out of memory");
+            return;
+        }
+    else
+        null;
+    defer if (heap_output_buf) |buf| std.heap.page_allocator.free(buf);
+    const output_buf = if (heap_output_buf) |buf| buf else stack_output_buf[0..decoded_size];
 
-    decoder.decode(output_buf[0..decoded_size], input) catch {
+    decoder.decode(output_buf, input) catch {
         js.throw(ctx.isolate, "atob: invalid base64");
         return;
     };
 
-    js.retString(ctx, output_buf[0..decoded_size]);
+    js.retString(ctx, output_buf);
 }
 
 fn btoaCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
@@ -72,12 +88,35 @@ fn btoaCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    var input_buf: [8192]u8 = undefined;
-    const input = js.readString(ctx.isolate, str, &input_buf);
+    // Stack+heap fallback for input buffer
+    const str_len = str.lenUtf8(ctx.isolate);
+    var stack_input_buf: [8192]u8 = undefined;
+    const heap_input_buf = if (str_len > 8192)
+        std.heap.page_allocator.alloc(u8, str_len) catch {
+            js.throw(ctx.isolate, "btoa: out of memory");
+            return;
+        }
+    else
+        null;
+    defer if (heap_input_buf) |buf| std.heap.page_allocator.free(buf);
+    const input = js.readString(ctx.isolate, str, if (heap_input_buf) |buf| buf else &stack_input_buf);
 
     const encoder = std.base64.standard.Encoder;
-    var output_buf: [16384]u8 = undefined;
-    const encoded = encoder.encode(&output_buf, input);
+
+    // Stack+heap fallback for output buffer (base64 expands by ~4/3)
+    const encoded_size = encoder.calcSize(input.len);
+    var stack_output_buf: [16384]u8 = undefined;
+    const heap_output_buf = if (encoded_size > 16384)
+        std.heap.page_allocator.alloc(u8, encoded_size) catch {
+            js.throw(ctx.isolate, "btoa: out of memory");
+            return;
+        }
+    else
+        null;
+    defer if (heap_output_buf) |buf| std.heap.page_allocator.free(buf);
+    const output_buf = if (heap_output_buf) |buf| buf else stack_output_buf[0..encoded_size];
+
+    const encoded = encoder.encode(output_buf, input);
 
     js.retString(ctx, encoded);
 }

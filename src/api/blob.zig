@@ -142,7 +142,12 @@ fn blobConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
             const arr = js.asArray(parts_arg);
             const len = arr.length();
 
-            var data_buf: [65536]u8 = undefined;
+            // Heap-allocate data buffer based on total_size computed above
+            const data_buf = blob_allocator.alloc(u8, total_size + 1) catch {
+                js.throw(ctx.isolate, "Blob: out of memory");
+                return;
+            };
+            defer blob_allocator.free(data_buf);
             var offset: usize = 0;
 
             var i: u32 = 0;
@@ -159,8 +164,7 @@ fn blobConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                     const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
                     const ab_data = backing_store.getData();
                     if (ab_data) |ptr| {
-                        const remaining = data_buf.len - offset;
-                        const copy_len = @min(ab_len, remaining);
+                        const copy_len = @min(ab_len, data_buf.len - offset);
                         const byte_ptr: [*]const u8 = @ptrCast(ptr);
                         @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[0..copy_len]);
                         offset += copy_len;
@@ -174,8 +178,7 @@ fn blobConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                     const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
                     const ab_data = backing_store.getData();
                     if (ab_data) |ptr| {
-                        const remaining = data_buf.len - offset;
-                        const copy_len = @min(view_len, remaining);
+                        const copy_len = @min(view_len, data_buf.len - offset);
                         const byte_ptr: [*]const u8 = @ptrCast(ptr);
                         @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[view_offset .. view_offset + copy_len]);
                         offset += copy_len;
@@ -183,15 +186,17 @@ fn blobConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                 }
             }
 
-            // Store as base64
+            // Store as base64 using heap allocation
             const base64_encoder = std.base64.standard;
             const encoded_len = base64_encoder.Encoder.calcSize(offset);
-            if (encoded_len <= 65536) {
-                var encoded_buf: [65536]u8 = undefined;
-                _ = base64_encoder.Encoder.encode(encoded_buf[0..encoded_len], data_buf[0..offset]);
-                _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, encoded_buf[0..encoded_len]));
-                _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_size", js.number(ctx.isolate, offset));
-            }
+            const encoded_buf = blob_allocator.alloc(u8, encoded_len) catch {
+                js.throw(ctx.isolate, "Blob: out of memory");
+                return;
+            };
+            defer blob_allocator.free(encoded_buf);
+            _ = base64_encoder.Encoder.encode(encoded_buf[0..encoded_len], data_buf[0..offset]);
+            _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, encoded_buf[0..encoded_len]));
+            _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_size", js.number(ctx.isolate, offset));
         }
     }
 }
@@ -225,17 +230,22 @@ fn blobText(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const data_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_data") catch
         return js.retResolvedPromise(ctx, empty);
 
-    // Decode base64
-    var data_buf: [65536]u8 = undefined;
+    // Decode base64 — heap-allocate buffer based on encoded data length
     const data_str = data_val.toString(ctx.context) catch
         return js.retResolvedPromise(ctx, empty);
-    const encoded_data = js.readString(ctx.isolate, data_str, &data_buf);
+    const encoded_len_hint = data_str.lenUtf8(ctx.isolate);
+    const data_buf = blob_allocator.alloc(u8, encoded_len_hint + 1) catch
+        return js.retResolvedPromise(ctx, empty);
+    defer blob_allocator.free(data_buf);
+    const encoded_data = js.readString(ctx.isolate, data_str, data_buf);
 
     const base64_decoder = std.base64.standard;
     const decoded_len = base64_decoder.Decoder.calcSizeForSlice(encoded_data) catch
         return js.retResolvedPromise(ctx, empty);
 
-    var decoded_buf: [65536]u8 = undefined;
+    const decoded_buf = blob_allocator.alloc(u8, decoded_len) catch
+        return js.retResolvedPromise(ctx, empty);
+    defer blob_allocator.free(decoded_buf);
     base64_decoder.Decoder.decode(decoded_buf[0..decoded_len], encoded_data) catch
         return js.retResolvedPromise(ctx, empty);
 
@@ -260,10 +270,13 @@ fn blobArrayBuffer(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
     const data_val = js.getProp(ctx.this, ctx.context, ctx.isolate, "_data") catch
         return js.retResolvedPromise(ctx, ab_value);
 
-    var data_buf: [65536]u8 = undefined;
     const data_str = data_val.toString(ctx.context) catch
         return js.retResolvedPromise(ctx, ab_value);
-    const encoded_data = js.readString(ctx.isolate, data_str, &data_buf);
+    const encoded_len_hint = data_str.lenUtf8(ctx.isolate);
+    const data_buf = blob_allocator.alloc(u8, encoded_len_hint + 1) catch
+        return js.retResolvedPromise(ctx, ab_value);
+    defer blob_allocator.free(data_buf);
+    const encoded_data = js.readString(ctx.isolate, data_str, data_buf);
 
     // Decode base64 and copy to ArrayBuffer
     const base64_decoder = std.base64.standard;
@@ -274,7 +287,9 @@ fn blobArrayBuffer(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
     const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
     const ab_data = backing_store.getData();
     if (ab_data) |ptr| {
-        var decoded_buf: [65536]u8 = undefined;
+        const decoded_buf = blob_allocator.alloc(u8, decoded_len) catch
+            return js.retResolvedPromise(ctx, ab_value);
+        defer blob_allocator.free(decoded_buf);
         base64_decoder.Decoder.decode(decoded_buf[0..decoded_len], encoded_data) catch {};
         const byte_ptr: [*]u8 = @ptrCast(ptr);
         @memcpy(byte_ptr[0..decoded_len], decoded_buf[0..decoded_len]);
@@ -367,13 +382,21 @@ fn blobSlice(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         js.ret(ctx, new_blob);
         return;
     };
-    var encoded_buf: [65536]u8 = undefined;
     const data_str = data_val.toString(ctx.context) catch {
         _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
         js.ret(ctx, new_blob);
         return;
     };
-    const encoded_data = js.readString(ctx.isolate, data_str, &encoded_buf);
+
+    // Heap-allocate encoded buffer
+    const encoded_buf_len = data_str.lenUtf8(ctx.isolate);
+    const encoded_buf = blob_allocator.alloc(u8, encoded_buf_len + 1) catch {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+        js.ret(ctx, new_blob);
+        return;
+    };
+    defer blob_allocator.free(encoded_buf);
+    const encoded_data = js.readString(ctx.isolate, data_str, encoded_buf);
 
     if (encoded_data.len == 0 or slice_size == 0) {
         _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
@@ -388,7 +411,12 @@ fn blobSlice(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
         js.ret(ctx, new_blob);
         return;
     };
-    var decoded_buf: [65536]u8 = undefined;
+    const decoded_buf = blob_allocator.alloc(u8, decoded_len) catch {
+        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
+        js.ret(ctx, new_blob);
+        return;
+    };
+    defer blob_allocator.free(decoded_buf);
     base64_decoder.Decoder.decode(decoded_buf[0..decoded_len], encoded_data) catch {
         _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
         js.ret(ctx, new_blob);
@@ -400,16 +428,17 @@ fn blobSlice(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const end_u: usize = @intCast(end);
     const sliced = decoded_buf[start_u..@min(end_u, decoded_len)];
 
-    // Re-encode the slice as base64
+    // Re-encode the slice as base64 using heap allocation
     const base64_encoder = std.base64.standard;
     const re_encoded_len = base64_encoder.Encoder.calcSize(sliced.len);
-    if (re_encoded_len <= 65536) {
-        var re_encoded_buf: [65536]u8 = undefined;
-        _ = base64_encoder.Encoder.encode(re_encoded_buf[0..re_encoded_len], sliced);
-        _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, re_encoded_buf[0..re_encoded_len]));
-    } else {
+    const re_encoded_buf = blob_allocator.alloc(u8, re_encoded_len) catch {
         _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, ""));
-    }
+        js.ret(ctx, new_blob);
+        return;
+    };
+    defer blob_allocator.free(re_encoded_buf);
+    _ = base64_encoder.Encoder.encode(re_encoded_buf[0..re_encoded_len], sliced);
+    _ = js.setProp(new_blob, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, re_encoded_buf[0..re_encoded_len]));
 
     js.ret(ctx, new_blob);
 }
@@ -436,10 +465,32 @@ fn fileConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
             const arr = js.asArray(parts_arg);
             const len = arr.length();
 
-            var data_buf: [65536]u8 = undefined;
+            // Compute total_size first
+            var total_size: usize = 0;
+            var i: u32 = 0;
+            while (i < len) : (i += 1) {
+                const elem = js.getIndex(arr.castTo(v8.Object), ctx.context, i) catch continue;
+                if (elem.isString()) {
+                    const str = elem.toString(ctx.context) catch continue;
+                    total_size += str.lenUtf8(ctx.isolate);
+                } else if (elem.isArrayBuffer()) {
+                    const ab = js.asArrayBuffer(elem);
+                    total_size += ab.getByteLength();
+                } else if (elem.isArrayBufferView()) {
+                    const view = js.asArrayBufferView(elem);
+                    total_size += view.getByteLength();
+                }
+            }
+
+            // Heap-allocate data buffer
+            const data_buf = blob_allocator.alloc(u8, total_size + 1) catch {
+                js.throw(ctx.isolate, "File: out of memory");
+                return;
+            };
+            defer blob_allocator.free(data_buf);
             var offset: usize = 0;
 
-            var i: u32 = 0;
+            i = 0;
             while (i < len) : (i += 1) {
                 const elem = js.getIndex(arr.castTo(v8.Object), ctx.context, i) catch continue;
                 if (elem.isString()) {
@@ -453,8 +504,7 @@ fn fileConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                     const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
                     const ab_data = backing_store.getData();
                     if (ab_data) |ptr| {
-                        const remaining = data_buf.len - offset;
-                        const copy_len = @min(ab_len, remaining);
+                        const copy_len = @min(ab_len, data_buf.len - offset);
                         const byte_ptr: [*]const u8 = @ptrCast(ptr);
                         @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[0..copy_len]);
                         offset += copy_len;
@@ -468,8 +518,7 @@ fn fileConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                     const backing_store = v8.BackingStore.sharedPtrGet(&shared_ptr);
                     const ab_data = backing_store.getData();
                     if (ab_data) |ptr| {
-                        const remaining = data_buf.len - offset;
-                        const copy_len = @min(view_len, remaining);
+                        const copy_len = @min(view_len, data_buf.len - offset);
                         const byte_ptr: [*]const u8 = @ptrCast(ptr);
                         @memcpy(data_buf[offset .. offset + copy_len], byte_ptr[view_offset .. view_offset + copy_len]);
                         offset += copy_len;
@@ -477,15 +526,17 @@ fn fileConstructor(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) voi
                 }
             }
 
-            // Store as base64
+            // Store as base64 using heap allocation
             const base64_encoder = std.base64.standard;
             const encoded_len = base64_encoder.Encoder.calcSize(offset);
-            if (encoded_len <= 65536) {
-                var encoded_buf: [65536]u8 = undefined;
-                _ = base64_encoder.Encoder.encode(encoded_buf[0..encoded_len], data_buf[0..offset]);
-                _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, encoded_buf[0..encoded_len]));
-                _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_size", js.number(ctx.isolate, offset));
-            }
+            const encoded_buf = blob_allocator.alloc(u8, encoded_len) catch {
+                js.throw(ctx.isolate, "File: out of memory");
+                return;
+            };
+            defer blob_allocator.free(encoded_buf);
+            _ = base64_encoder.Encoder.encode(encoded_buf[0..encoded_len], data_buf[0..offset]);
+            _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_data", js.string(ctx.isolate, encoded_buf[0..encoded_len]));
+            _ = js.setProp(ctx.this, ctx.context, ctx.isolate, "_size", js.number(ctx.isolate, offset));
         }
     }
 
