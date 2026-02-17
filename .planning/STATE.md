@@ -10,15 +10,15 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 ## Current Position
 
 Milestone: v1.3 Backlog Cleanup
-Phase: v1.3-01 of v1.3-03 (Async Foundation)
-Plan: 1 of 3 in current phase
-Status: Plan 01 complete, Wave 2 (Plans 02+03) ready
-Last activity: 2026-02-17 — Plan 01 (heap buffer fallback) complete, all tests pass
+Phase: v1.3-01 of v1.3-03 (Async Foundation) — COMPLETE
+Plan: 3 of 3 in current phase — all complete
+Status: Phase v1.3-01 complete, ready for v1.3-02
+Last activity: 2026-02-17 — Phase v1.3-01 complete (heap buffers, async fetch, async WritableStream)
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
 Progress: [##########] 100% (v1.2)
-Progress: [█░░░░░░░░░] 12% (v1.3 — 1/8 plans complete)
+Progress: [███░░░░░░░] 37% (v1.3 — 3/8 plans complete, phase 1 of 3 done)
 
 ## Shipped Milestones
 
