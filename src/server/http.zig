@@ -8,6 +8,7 @@ const event_loop_mod = @import("event_loop");
 const EventLoop = event_loop_mod.EventLoop;
 const ConfigWatcher = event_loop_mod.ConfigWatcher;
 const timers = @import("timers");
+const fetch_api = @import("fetch");
 const config_mod = @import("config");
 
 // Get the actual type from the function return type
@@ -86,6 +87,7 @@ pub const HttpServer = struct {
     pub fn loadApp(self: *HttpServer, app_path: []const u8) !void {
         // Set global event loop reference BEFORE loading app (app init may use timers)
         timers.setEventLoop(&self.event_loop);
+        fetch_api.setEventLoop(&self.event_loop);
 
         self.app = app_module.loadApp(self.allocator, app_path, self.array_buffer_allocator, null, null) catch |err| {
             logError("Failed to load app", app_path, err);
@@ -102,6 +104,7 @@ pub const HttpServer = struct {
     pub fn loadApps(self: *HttpServer, cfg: config_mod.Config) !void {
         // Set global event loop reference BEFORE loading apps
         timers.setEventLoop(&self.event_loop);
+        fetch_api.setEventLoop(&self.event_loop);
 
         var logger = log.stdout();
 
@@ -425,6 +428,7 @@ pub const HttpServer = struct {
     pub fn run(self: *HttpServer) !void {
         // Ensure event loop is set (may not be if no app loaded)
         timers.setEventLoop(&self.event_loop);
+        fetch_api.setEventLoop(&self.event_loop);
 
         var logger = log.stdout();
         logger.info("server_start", .{
@@ -731,14 +735,16 @@ pub const HttpServer = struct {
         }
     }
 
-    /// Process event loop - tick and execute any pending timer callbacks
+    /// Process event loop - tick and execute any pending timer/fetch callbacks
     fn processEventLoop(self: *HttpServer, app: *app_module.App) void {
         // Tick the event loop to check for completed timers
         _ = self.event_loop.tick() catch return;
 
-        // Only enter V8 if there are completed callbacks to process
+        // Check if there are completed timer callbacks or fetch results to process
         const completed = self.event_loop.getCompletedCallbacks();
-        if (completed.len > 0) {
+        const has_fetches = self.event_loop.completed_fetches.items.len > 0;
+
+        if (completed.len > 0 or has_fetches) {
             // Must enter isolate + HandleScope since handleRequest already exited
             var isolate = app.isolate;
             isolate.enter();
@@ -753,7 +759,14 @@ pub const HttpServer = struct {
             defer context.exit();
 
             // Execute any pending timer callbacks
-            timers.executePendingTimers(isolate, context, &self.event_loop);
+            if (completed.len > 0) {
+                timers.executePendingTimers(isolate, context, &self.event_loop);
+            }
+
+            // Resolve any completed fetch promises
+            if (has_fetches) {
+                fetch_api.resolveCompletedFetches(isolate, context, &self.event_loop);
+            }
         }
 
         // Clean up inactive timers

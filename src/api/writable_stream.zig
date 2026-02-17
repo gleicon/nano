@@ -5,6 +5,34 @@ const js = @import("js");
 /// Max buffer size for WritableStream (passed from config)
 var global_max_buffer_size: usize = 64 * 1024 * 1024; // 64MB default
 
+/// Track streams with pending async sink writes (for event loop polling)
+var pending_async_streams: std.ArrayListUnmanaged(v8.Persistent(v8.Object)) = .{};
+var pending_streams_allocator: std.mem.Allocator = std.heap.page_allocator;
+
+/// Register a stream as having a pending async sink write
+fn registerPendingAsyncStream(isolate: v8.Isolate, stream: v8.Object) void {
+    const persistent = v8.Persistent(v8.Object).init(isolate, stream);
+    pending_async_streams.append(pending_streams_allocator, persistent) catch {};
+}
+
+/// Process all pending async streams — called from event loop
+pub fn processPendingAsyncSinks(isolate: v8.Isolate, context: v8.Context) void {
+    var i: usize = 0;
+    while (i < pending_async_streams.items.len) {
+        var persistent = &pending_async_streams.items[i];
+        const stream = persistent.castToObject();
+
+        if (checkAsyncSinkCompletion(isolate, context, stream)) {
+            // Done with this stream's pending write — remove from list
+            persistent.deinit();
+            _ = pending_async_streams.swapRemove(i);
+            // Don't increment i — swapRemove moved last element here
+        } else {
+            i += 1;
+        }
+    }
+}
+
 /// Register WritableStream, WritableStreamDefaultController, and WritableStreamDefaultWriter APIs
 pub fn registerWritableStreamAPI(isolate: v8.Isolate, context: v8.Context, max_buffer_size: usize) void {
     global_max_buffer_size = max_buffer_size;
@@ -574,7 +602,7 @@ fn processWriteQueue(isolate: v8.Isolate, context: v8.Context, stream: v8.Object
                     try_catch.init(isolate);
                     defer try_catch.deinit();
 
-                    _ = write_fn.call(context, sv, &write_args);
+                    const write_result = write_fn.call(context, sv, &write_args);
 
                     if (try_catch.hasCaught()) {
                         // Sink threw an error - transition to errored state
@@ -587,12 +615,33 @@ fn processWriteQueue(isolate: v8.Isolate, context: v8.Context, stream: v8.Object
                         _ = js.setProp(stream, context, isolate, "_writing", js.boolean(isolate, false));
                         return;
                     }
+
+                    // ASYNC-03: Check if sink returned a Promise (async sink)
+                    if (write_result) |wr| {
+                        if (wr.isPromise()) {
+                            // The sink returned a Promise. We need to wait for it
+                            // to resolve before resolving the write promise.
+                            // Approach: create a new combined Promise that awaits
+                            // the sink promise, then resolves the write promise.
+                            // Store the sink promise on the stream so the wait loop can process it.
+                            _ = js.setProp(stream, context, isolate, "_pendingSinkPromise", wr);
+                            _ = js.setProp(stream, context, isolate, "_pendingWriteResolver", resolver_val);
+                            _ = js.setProp(stream, context, isolate, "_pendingChunkSize", js.number(isolate, chunk_size).toValue());
+
+                            // Register for event loop polling
+                            registerPendingAsyncStream(isolate, stream);
+
+                            // Leave _writing = true — checkAsyncSinkCompletion will clear it
+                            return;
+                        }
+                    }
                 }
             }
         }
     }
 
-    // Resolve this write's promise
+    // === SYNC SINK PATH (existing behavior) ===
+    // Resolve this write's promise immediately
     const resolver = v8.PromiseResolver{ .handle = @ptrCast(resolver_val.handle) };
     _ = resolver.resolve(context, js.undefined_(isolate).toValue());
 
@@ -654,6 +703,111 @@ fn processWriteQueue(isolate: v8.Isolate, context: v8.Context, stream: v8.Object
             }
         }
     }
+}
+
+/// Check if any WritableStream has a pending async sink promise that resolved.
+/// Called from the event loop after microtask processing.
+/// The stream object must be passed by the caller (stored during write).
+pub fn checkAsyncSinkCompletion(isolate: v8.Isolate, context: v8.Context, stream: v8.Object) bool {
+    // Check if there's a pending sink promise
+    const sink_promise_val = js.getProp(stream, context, isolate, "_pendingSinkPromise") catch return false;
+    if (sink_promise_val.isUndefined() or !sink_promise_val.isPromise()) return false;
+
+    const promise = v8.Promise{ .handle = @ptrCast(sink_promise_val.handle) };
+    const state = promise.getState();
+
+    if (state == .kPending) return false; // Still waiting
+
+    // Clear the pending state
+    _ = js.setProp(stream, context, isolate, "_pendingSinkPromise", js.undefined_(isolate).toValue());
+
+    const resolver_val = js.getProp(stream, context, isolate, "_pendingWriteResolver") catch return true;
+    const chunk_size_val = js.getProp(stream, context, isolate, "_pendingChunkSize") catch js.number(isolate, 0).toValue();
+    const chunk_size = if (chunk_size_val.isNumber()) @as(usize, @intFromFloat(chunk_size_val.toF64(context) catch 0)) else 0;
+
+    _ = js.setProp(stream, context, isolate, "_pendingWriteResolver", js.undefined_(isolate).toValue());
+    _ = js.setProp(stream, context, isolate, "_pendingChunkSize", js.undefined_(isolate).toValue());
+
+    const resolver = v8.PromiseResolver{ .handle = @ptrCast(resolver_val.handle) };
+
+    if (state == .kRejected) {
+        // Sink errored — reject write promise and error the stream
+        promise.markAsHandled();
+        const rejection = promise.getResult();
+        _ = resolver.reject(context, rejection);
+        _ = js.setProp(stream, context, isolate, "_state", js.string(isolate, "errored"));
+        _ = js.setProp(stream, context, isolate, "_writing", js.boolean(isolate, false));
+        return true;
+    }
+
+    // Sink fulfilled — resolve write promise and continue queue
+    _ = resolver.resolve(context, js.undefined_(isolate).toValue());
+
+    // Remove first item from queue
+    const queue_val = js.getProp(stream, context, isolate, "_queue") catch {
+        _ = js.setProp(stream, context, isolate, "_writing", js.boolean(isolate, false));
+        return true;
+    };
+    if (queue_val.isArray()) {
+        const queue = js.asArray(queue_val);
+        const new_queue = js.array(isolate, 0);
+        var i: u32 = 1;
+        while (i < queue.length()) : (i += 1) {
+            const elem = js.getIndex(queue.castTo(v8.Object), context, i) catch continue;
+            _ = js.setIndex(new_queue.castTo(v8.Object), context, i - 1, elem);
+        }
+        _ = js.setProp(stream, context, isolate, "_queue", new_queue);
+
+        // Update queue byte size
+        const current_size_val = js.getProp(stream, context, isolate, "_queueByteSize") catch {
+            _ = js.setProp(stream, context, isolate, "_writing", js.boolean(isolate, false));
+            return true;
+        };
+        const current_size = if (current_size_val.isNumber()) @as(usize, @intFromFloat(current_size_val.toF64(context) catch 0)) else 0;
+        const new_size = if (current_size >= chunk_size) current_size - chunk_size else 0;
+        _ = js.setProp(stream, context, isolate, "_queueByteSize", js.number(isolate, new_size));
+
+        // Check ready promise
+        const hwm_val = js.getProp(stream, context, isolate, "_highWaterMark") catch {
+            _ = js.setProp(stream, context, isolate, "_writing", js.boolean(isolate, false));
+            return true;
+        };
+        const hwm = if (hwm_val.isNumber()) hwm_val.toF64(context) catch 1.0 else 1.0;
+        if (@as(f64, @floatFromInt(new_queue.length())) <= hwm) {
+            const ready_resolver_val = js.getProp(stream, context, isolate, "_readyResolver") catch null;
+            if (ready_resolver_val) |rrv| {
+                if (rrv.isObject()) {
+                    const ready_resolver = v8.PromiseResolver{ .handle = @ptrCast(rrv.handle) };
+                    _ = ready_resolver.resolve(context, js.undefined_(isolate).toValue());
+                }
+            }
+        }
+
+        // Mark as not writing and process next
+        _ = js.setProp(stream, context, isolate, "_writing", js.boolean(isolate, false));
+
+        if (new_queue.length() > 0) {
+            processWriteQueue(isolate, context, stream);
+        } else {
+            // Check close requested
+            const close_requested_val = js.getProp(stream, context, isolate, "_closeRequested") catch null;
+            if (close_requested_val) |crv| {
+                if (crv.isBoolean() and crv.isTrue()) {
+                    const close_resolver_val = js.getProp(stream, context, isolate, "_closeResolver") catch null;
+                    if (close_resolver_val) |csv| {
+                        if (csv.isObject()) {
+                            const close_resolver = v8.PromiseResolver{ .handle = @ptrCast(csv.handle) };
+                            finishClose(isolate, context, stream, close_resolver);
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        _ = js.setProp(stream, context, isolate, "_writing", js.boolean(isolate, false));
+    }
+
+    return true;
 }
 
 fn writerClose(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {

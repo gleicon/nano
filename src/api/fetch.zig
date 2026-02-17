@@ -1,10 +1,152 @@
 const std = @import("std");
 const v8 = @import("v8");
 const js = @import("js");
+const event_loop_mod = @import("event_loop");
+const EventLoop = event_loop_mod.EventLoop;
+const CompletedFetch = event_loop_mod.CompletedFetch;
 const http = std.http;
 
 /// Allocator for HTTP operations
 const fetch_allocator = std.heap.page_allocator;
+
+// === Async Fetch Infrastructure ===
+
+/// Global event loop pointer (set once at server startup)
+var global_event_loop: ?*EventLoop = null;
+
+/// Set the event loop reference for async fetch operations
+pub fn setEventLoop(el: *EventLoop) void {
+    global_event_loop = el;
+}
+
+/// FetchOperation: tracks an in-flight async fetch (lives on heap, owned until worker completes)
+pub const FetchOperation = struct {
+    resolver_id: usize, // maps to resolver registry
+    url: []u8,
+    method: []u8,
+    body: []u8,
+    allocator: std.mem.Allocator,
+    event_loop: *EventLoop,
+
+    pub fn deinit(self: *FetchOperation) void {
+        self.allocator.free(self.url);
+        self.allocator.free(self.method);
+        if (self.body.len > 0) self.allocator.free(self.body);
+        self.allocator.destroy(self);
+    }
+};
+
+/// Resolver registry entry: maps a resolver ID to a persistent V8 PromiseResolver
+const ResolverEntry = struct {
+    id: usize,
+    resolver: *v8.Persistent(v8.PromiseResolver),
+};
+
+var resolver_list: std.ArrayListUnmanaged(ResolverEntry) = .{};
+var resolver_mutex: std.Thread.Mutex = .{};
+var next_resolver_id: std.atomic.Value(usize) = std.atomic.Value(usize).init(1);
+
+/// Store a resolver persistently and return its unique ID
+fn storeResolver(isolate: v8.Isolate, resolver: v8.PromiseResolver) usize {
+    const id = next_resolver_id.fetchAdd(1, .monotonic);
+    // Heap-allocate persistent handle so it survives beyond this scope
+    const persistent_ptr = fetch_allocator.create(v8.Persistent(v8.PromiseResolver)) catch return 0;
+    persistent_ptr.* = v8.Persistent(v8.PromiseResolver).init(isolate, resolver);
+    resolver_mutex.lock();
+    defer resolver_mutex.unlock();
+    resolver_list.append(fetch_allocator, .{
+        .id = id,
+        .resolver = persistent_ptr,
+    }) catch {
+        persistent_ptr.deinit();
+        fetch_allocator.destroy(persistent_ptr);
+        return 0;
+    };
+    return id;
+}
+
+/// Retrieve and remove a resolver by ID (returns persistent ptr for caller to manage)
+fn takeResolver(id: usize) ?*v8.Persistent(v8.PromiseResolver) {
+    resolver_mutex.lock();
+    defer resolver_mutex.unlock();
+    for (resolver_list.items, 0..) |entry, i| {
+        if (entry.id == id) {
+            const result = entry.resolver;
+            _ = resolver_list.swapRemove(i);
+            return result;
+        }
+    }
+    return null;
+}
+
+/// Resolve completed fetch promises (called from main thread after event loop tick)
+pub fn resolveCompletedFetches(isolate: v8.Isolate, context: v8.Context, el: *EventLoop) void {
+    const items = el.drainCompletedFetches();
+    if (items.len == 0) return;
+    defer el.allocator.free(items);
+
+    for (items) |*item| {
+        defer item.deinit();
+
+        const persistent_ptr = takeResolver(item.resolver_id) orelse continue;
+        defer {
+            persistent_ptr.deinit();
+            fetch_allocator.destroy(persistent_ptr);
+        }
+
+        const resolver = persistent_ptr.castToPromiseResolver();
+
+        // Use TryCatch to prevent pending exceptions from corrupting V8 state
+        var try_catch: v8.TryCatch = undefined;
+        try_catch.init(isolate);
+        defer try_catch.deinit();
+
+        if (item.err_msg) |msg| {
+            _ = resolver.reject(context, v8.String.initUtf8(isolate, msg).toValue());
+        } else {
+            // Parse headers from JSON back to HeaderEntry slice
+            var header_list: [0]HeaderEntry = .{};
+            const response = createFetchResponse(isolate, context, item.status, item.body, &header_list);
+            _ = resolver.resolve(context, v8.Value{ .handle = @ptrCast(response.handle) });
+        }
+    }
+}
+
+/// Worker thread function: performs blocking HTTP I/O, posts result to EventLoop
+fn fetchWorker(op: *FetchOperation) void {
+    const resolver_id = op.resolver_id;
+    const el = op.event_loop;
+
+    var result = doFetch(op.url, op.method, op.body) catch |err| {
+        var eb: [256]u8 = undefined;
+        const msg = std.fmt.bufPrint(&eb, "fetch failed: {s}", .{@errorName(err)}) catch "fetch failed";
+        const err_copy = fetch_allocator.dupe(u8, msg) catch null;
+        el.addCompletedFetch(.{
+            .resolver_id = resolver_id,
+            .status = 0,
+            .body = &.{},
+            .headers_json = &.{},
+            .err_msg = err_copy,
+            .allocator = fetch_allocator,
+        });
+        op.deinit();
+        return;
+    };
+    defer result.deinit();
+
+    // Copy body for transfer to main thread
+    const body_copy = fetch_allocator.dupe(u8, result.body) catch @as([]u8, &.{});
+
+    el.addCompletedFetch(.{
+        .resolver_id = resolver_id,
+        .status = result.status,
+        .body = body_copy,
+        .headers_json = &.{},
+        .err_msg = null,
+        .allocator = fetch_allocator,
+    });
+    op.deinit();
+}
 
 // === SSRF Protection ===
 // Block requests to internal/private networks to prevent Server-Side Request Forgery
@@ -147,7 +289,9 @@ pub fn registerFetchAPI(isolate: v8.Isolate, context: v8.Context) void {
 }
 
 /// fetch() - Makes HTTP requests and returns a Promise<Response>
-/// Supports both URL string and Request object as first argument
+/// Supports both URL string and Request object as first argument.
+/// In server mode (event loop available): non-blocking, spawns worker thread.
+/// In eval/repl mode (no event loop): falls back to synchronous blocking fetch.
 fn fetchCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(raw_info);
     const isolate = info.getIsolate();
@@ -169,7 +313,10 @@ fn fetchCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void 
     var method_buf: [16]u8 = undefined;
     var method_len: usize = 3;
     @memcpy(method_buf[0..3], "GET");
-    var body_buf: [65536]u8 = undefined;
+
+    // BUF-03: heap-allocate body for potentially large payloads (>64KB)
+    var body_stack: [65536]u8 = undefined;
+    var body_heap: ?[]u8 = null;
     var body_len: usize = 0;
 
     if (url_arg.isString()) {
@@ -206,12 +353,22 @@ fn fetchCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void 
             }
         }
 
-        // Get body from request
+        // Get body from request (BUF-03: heap fallback for large bodies)
         const body_val = request_obj.getValue(context, v8.String.initUtf8(isolate, "_body")) catch null;
         if (body_val) |bv| {
             const b_str = bv.toString(context) catch null;
             if (b_str) |bs| {
-                body_len = bs.writeUtf8(isolate, &body_buf);
+                const blen = bs.lenUtf8(isolate);
+                if (blen > body_stack.len) {
+                    body_heap = fetch_allocator.alloc(u8, blen) catch {
+                        _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: body too large").toValue());
+                        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+                        return;
+                    };
+                    body_len = bs.writeUtf8(isolate, body_heap.?);
+                } else {
+                    body_len = bs.writeUtf8(isolate, &body_stack);
+                }
             }
         }
     } else {
@@ -237,13 +394,26 @@ fn fetchCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void 
                 }
             }
 
-            // Check for body
+            // Check for body (BUF-03: heap fallback for large bodies)
             const body_val = opts_obj.getValue(context, v8.String.initUtf8(isolate, "body")) catch null;
             if (body_val) |bv| {
                 if (bv.isString()) {
                     const b_str = bv.toString(context) catch null;
                     if (b_str) |bs| {
-                        body_len = bs.writeUtf8(isolate, &body_buf);
+                        // Free previous heap body if Request already provided one
+                        if (body_heap) |prev| fetch_allocator.free(prev);
+                        body_heap = null;
+                        const blen = bs.lenUtf8(isolate);
+                        if (blen > body_stack.len) {
+                            body_heap = fetch_allocator.alloc(u8, blen) catch {
+                                _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: body too large").toValue());
+                                info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+                                return;
+                            };
+                            body_len = bs.writeUtf8(isolate, body_heap.?);
+                        } else {
+                            body_len = bs.writeUtf8(isolate, &body_stack);
+                        }
                     }
                 }
             }
@@ -252,24 +422,104 @@ fn fetchCallback(raw_info: ?*const v8.C_FunctionCallbackInfo) callconv(.c) void 
 
     const url = url_buf[0..url_len];
     const method = method_buf[0..method_len];
-    const body = body_buf[0..body_len];
+    const body = if (body_heap) |h| h[0..body_len] else body_stack[0..body_len];
 
-    // Make the HTTP request
-    var result = doFetch(url, method, body) catch |err| {
-        var err_buf: [256]u8 = undefined;
-        const err_msg = std.fmt.bufPrint(&err_buf, "fetch failed: {s}", .{@errorName(err)}) catch "fetch failed";
-        _ = resolver.reject(context, v8.String.initUtf8(isolate, err_msg).toValue());
+    // Check if we have an event loop (server mode = async, eval/repl = sync fallback)
+    if (global_event_loop) |el| {
+        // === ASYNC PATH: spawn worker thread ===
+        const resolver_id = storeResolver(isolate, resolver);
+        if (resolver_id == 0) {
+            if (body_heap) |h| fetch_allocator.free(h);
+            _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: out of memory (resolver)").toValue());
+            info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+            return;
+        }
+
+        // Allocate FetchOperation on heap (owned by worker thread until completion)
+        const op = fetch_allocator.create(FetchOperation) catch {
+            _ = takeResolver(resolver_id);
+            if (body_heap) |h| fetch_allocator.free(h);
+            _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: out of memory").toValue());
+            info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+            return;
+        };
+
+        // Copy URL, method, body to heap for thread ownership
+        const url_copy = fetch_allocator.dupe(u8, url) catch {
+            _ = takeResolver(resolver_id);
+            if (body_heap) |h| fetch_allocator.free(h);
+            fetch_allocator.destroy(op);
+            _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: out of memory").toValue());
+            info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+            return;
+        };
+        const method_copy = fetch_allocator.dupe(u8, method) catch {
+            _ = takeResolver(resolver_id);
+            if (body_heap) |h| fetch_allocator.free(h);
+            fetch_allocator.free(url_copy);
+            fetch_allocator.destroy(op);
+            _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: out of memory").toValue());
+            info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+            return;
+        };
+        // For body: if already heap-allocated, transfer ownership; otherwise dupe
+        const body_copy = if (body_heap) |h| h else if (body_len > 0)
+            fetch_allocator.dupe(u8, body) catch {
+                _ = takeResolver(resolver_id);
+                fetch_allocator.free(url_copy);
+                fetch_allocator.free(method_copy);
+                fetch_allocator.destroy(op);
+                _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: out of memory").toValue());
+                info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+                return;
+            }
+        else
+            @as([]u8, &.{});
+        // body_heap ownership transferred to op, don't free it
+        body_heap = null;
+
+        op.* = .{
+            .resolver_id = resolver_id,
+            .url = url_copy,
+            .method = method_copy,
+            .body = body_copy,
+            .allocator = fetch_allocator,
+            .event_loop = el,
+        };
+
+        // Increment pending count BEFORE spawning thread
+        el.incrementPendingFetch();
+
+        // Spawn worker thread
+        const thread = std.Thread.spawn(.{}, fetchWorker, .{op}) catch {
+            _ = el.pending_fetch_count.fetchSub(1, .release);
+            _ = takeResolver(resolver_id);
+            op.deinit();
+            _ = resolver.reject(context, v8.String.initUtf8(isolate, "fetch: thread spawn failed").toValue());
+            info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+            return;
+        };
+        thread.detach();
+
+        // Return unresolved Promise immediately — worker will resolve it later
         info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
-        return;
-    };
-    defer result.deinit();
+    } else {
+        // === SYNC FALLBACK: eval/repl mode (no event loop) ===
+        defer if (body_heap) |h| fetch_allocator.free(h);
 
-    // Create Response object
-    const response = createFetchResponse(isolate, context, result.status, result.body, result.headers);
+        var result = doFetch(url, method, body) catch |err| {
+            var err_buf: [256]u8 = undefined;
+            const err_msg = std.fmt.bufPrint(&err_buf, "fetch failed: {s}", .{@errorName(err)}) catch "fetch failed";
+            _ = resolver.reject(context, v8.String.initUtf8(isolate, err_msg).toValue());
+            info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+            return;
+        };
+        defer result.deinit();
 
-    // Resolve the promise with the Response
-    _ = resolver.resolve(context, v8.Value{ .handle = @ptrCast(response.handle) });
-    info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+        const response = createFetchResponse(isolate, context, result.status, result.body, result.headers);
+        _ = resolver.resolve(context, v8.Value{ .handle = @ptrCast(response.handle) });
+        info.getReturnValue().set(v8.Value{ .handle = @ptrCast(promise.handle) });
+    }
 }
 
 /// A single HTTP header name-value pair (owned copies)

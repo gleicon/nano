@@ -166,6 +166,9 @@ pub fn build(b: *std.Build) void {
     });
     event_loop_module.addImport("xev", xev_module);
 
+    // fetch needs event_loop for async fetch operations
+    fetch_module.addImport("event_loop", event_loop_module);
+
     // Create runtime/timers module
     const timers_module = b.createModule(.{
         .root_source_file = b.path("src/runtime/timers.zig"),
@@ -281,6 +284,7 @@ pub fn build(b: *std.Build) void {
     server_module.addImport("event_loop", event_loop_module);
     server_module.addImport("timers", timers_module);
     server_module.addImport("config", config_module);
+    server_module.addImport("fetch", fetch_module);
 
     // Create the root module for nano
     const root_module = b.createModule(.{

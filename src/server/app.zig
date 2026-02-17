@@ -551,10 +551,21 @@ pub fn handleRequest(
             // Run event loop tick if available
             if (app.event_loop) |loop| {
                 _ = loop.tick() catch {};
+                // Execute timer callbacks that fired during the tick
+                timers.executePendingTimers(isolate, context, loop);
+                // Resolve any completed async fetch promises
+                fetch_api.resolveCompletedFetches(isolate, context, loop);
             }
+            // Process pending async WritableStream sinks
+            writable_stream.processPendingAsyncSinks(isolate, context);
             // Run microtasks again
             isolate.performMicrotasksCheckpoint();
             iterations += 1;
+
+            // Brief sleep to yield CPU and let worker threads complete
+            if (promise.getState() == .kPending) {
+                std.Thread.sleep(1_000_000); // 1ms
+            }
         }
 
         if (promise.getState() == .kRejected) {
