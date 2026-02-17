@@ -48,7 +48,7 @@ See `milestones/v1.2-ROADMAP.md` for full details.
 
 ## Phases
 
-- [ ] **Phase v1.3-01: Async Foundation** — Heap-allocated buffers and non-blocking async fetch with Promise-aware WritableStream
+- [x] **Phase v1.3-01: Async Foundation** — Heap-allocated buffers and non-blocking async fetch with Promise-aware WritableStream (completed 2026-02-17)
 - [ ] **Phase v1.3-02: Crypto & Streams** — crypto.subtle algorithm expansion (AES-GCM, RSA-PSS, ECDSA, key management) and ReadableStream.tee() fix
 - [ ] **Phase v1.3-03: API Completion** — WinterCG globals (structuredClone, queueMicrotask, performance.now) and URL property setters
 
