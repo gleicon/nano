@@ -1,0 +1,10 @@
+{
+  "apps": [
+    {
+      "name": "event-loop-test",
+      "path": "./test/event-loop-test",
+      "timeout_ms": 60000,
+      "memory_mb": 512
+    }
+  ]
+}

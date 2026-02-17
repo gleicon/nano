@@ -1,0 +1,11 @@
+{
+  "apps": [
+    {
+      "name": "async-test",
+      "path": "./test/async-fetch-test",
+      "port": 9998,
+      "timeout_ms": 30000,
+      "memory_mb": 256
+    }
+  ]
+}

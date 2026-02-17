@@ -1,0 +1,11 @@
+{
+  "apps": [
+    {
+      "name": "heap-test",
+      "path": "./test/heap-buffer-test",
+      "port": 9999,
+      "timeout_ms": 10000,
+      "memory_mb": 256
+    }
+  ]
+}
