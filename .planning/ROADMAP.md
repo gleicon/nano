@@ -67,7 +67,7 @@ See `milestones/v1.2-ROADMAP.md` for full details.
 **Plans**: 3 plans
 
 Plans:
-- [ ] v1.3-01-01-PLAN.md — Heap buffer fallback for blob.zig, encoding.zig, console.zig (BUF-01..05)
+- [x] v1.3-01-01-PLAN.md — Heap buffer fallback for blob.zig, encoding.zig, console.zig (BUF-01..05)
 - [ ] v1.3-01-02-PLAN.md — Async fetch with thread pool + Promise resolver lifecycle (ASYNC-01, ASYNC-02, BUF-03)
 - [ ] v1.3-01-03-PLAN.md — WritableStream async sink detection and deferred write resolution (ASYNC-03)
 
@@ -110,9 +110,9 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| v1.3-01: Async Foundation | 0/3 | Not started | - |
+| v1.3-01: Async Foundation | 1/3 | In progress | - |
 | v1.3-02: Crypto & Streams | 0/3 | Not started | - |
 | v1.3-03: API Completion | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-17 — v1.3-01 plans created (3 plans, 2 waves)*
+*Last updated: 2026-02-17 — Plan 01 complete, Wave 2 (Plans 02+03) pending*

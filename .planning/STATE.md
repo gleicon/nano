@@ -11,14 +11,14 @@ See: .planning/PROJECT.md (updated 2026-02-15)
 
 Milestone: v1.3 Backlog Cleanup
 Phase: v1.3-01 of v1.3-03 (Async Foundation)
-Plan: 0 of 3 in current phase
-Status: Ready to plan
-Last activity: 2026-02-15 — v1.3 roadmap created, 3 phases, 20 requirements mapped
+Plan: 1 of 3 in current phase
+Status: Plan 01 complete, Wave 2 (Plans 02+03) ready
+Last activity: 2026-02-17 — Plan 01 (heap buffer fallback) complete, all tests pass
 
 Progress: [##########] 100% (v1.0)
 Progress: [##########] 100% (v1.1)
 Progress: [##########] 100% (v1.2)
-Progress: [░░░░░░░░░░] 0% (v1.3 — 0/8 plans complete)
+Progress: [█░░░░░░░░░] 12% (v1.3 — 1/8 plans complete)
 
 ## Shipped Milestones
 
@@ -60,9 +60,9 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-02-15
-Stopped at: v1.3 roadmap created — ready to plan Phase v1.3-01
+Last session: 2026-02-17
+Stopped at: Phase v1.3-01 Plan 01 complete — Wave 2 (Plans 02+03) next
 Resume file: None
 
 ---
-*Last updated: 2026-02-15 after v1.3 roadmap creation*
+*Last updated: 2026-02-17 after Plan v1.3-01-01 completion*
