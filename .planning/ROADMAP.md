@@ -64,12 +64,12 @@ See `milestones/v1.2-ROADMAP.md` for full details.
   3. Two concurrent fetch() calls to different hosts resolve independently without one blocking the other
   4. A WritableStream with an async sink function (returning a Promise) accepts writes and signals backpressure correctly — write() returns a Promise that resolves when the sink drains
   5. atob()/btoa() with a 50KB base64 string round-trips correctly; console.log of a 10KB string prints the full value
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] v1.3-01-01: Heap buffer fallback (BUF-01..05) — allocator context, fallback logic for Blob, fetch body, atob, console
-- [ ] v1.3-01-02: Async fetch core (ASYNC-01, ASYNC-02) — xev socket ops, Promise resolver lifecycle, HTTP parsing
-- [ ] v1.3-01-03: WritableStream async sink (ASYNC-03) — pending resolver tracking, backpressure Promise integration
+- [ ] v1.3-01-01-PLAN.md — Heap buffer fallback for blob.zig, encoding.zig, console.zig (BUF-01..05)
+- [ ] v1.3-01-02-PLAN.md — Async fetch with thread pool + Promise resolver lifecycle (ASYNC-01, ASYNC-02, BUF-03)
+- [ ] v1.3-01-03-PLAN.md — WritableStream async sink detection and deferred write resolution (ASYNC-03)
 
 ### Phase v1.3-02: Crypto & Streams
 **Goal**: crypto.subtle supports symmetric (AES-GCM) and asymmetric (RSA-PSS, ECDSA) algorithms with key import/export, and ReadableStream.tee() delivers all chunks to both branches without data loss
@@ -115,4 +115,4 @@ Plans:
 | v1.3-03: API Completion | 0/2 | Not started | - |
 
 ---
-*Last updated: 2026-02-15 — v1.3 roadmap created*
+*Last updated: 2026-02-17 — v1.3-01 plans created (3 plans, 2 waves)*
