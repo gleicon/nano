@@ -1,6 +1,22 @@
 const std = @import("std");
 const xev = @import("xev");
 
+/// Result of a completed async fetch (transferred from worker thread to main loop)
+pub const CompletedFetch = struct {
+    resolver_id: usize, // maps to resolver registry in fetch.zig
+    status: u16,
+    body: []u8, // heap-allocated, owned by this struct
+    headers_json: []u8, // JSON string of headers, heap-allocated
+    err_msg: ?[]u8, // non-null if fetch failed
+    allocator: std.mem.Allocator,
+
+    pub fn deinit(self: *CompletedFetch) void {
+        if (self.body.len > 0) self.allocator.free(self.body);
+        if (self.headers_json.len > 0) self.allocator.free(self.headers_json);
+        if (self.err_msg) |msg| self.allocator.free(msg);
+    }
+};
+
 // Forward declaration for HttpServer reload callback
 // with a function pointer to avoid circular import conflicts with http module
 pub const ReloadCallback = *const fn (*anyopaque) void;
@@ -151,6 +167,10 @@ pub const EventLoop = struct {
     next_timer_id: u32,
     timers: std.ArrayListUnmanaged(PendingTimer),
     completed_callbacks: std.ArrayListUnmanaged(TimerCallback),
+    // Async fetch tracking
+    pending_fetch_count: std.atomic.Value(u32),
+    completed_fetches: std.ArrayListUnmanaged(CompletedFetch),
+    fetch_mutex: std.Thread.Mutex,
 
     pub fn init(allocator: std.mem.Allocator) !EventLoop {
         return EventLoop{
@@ -160,12 +180,20 @@ pub const EventLoop = struct {
             .next_timer_id = 1,
             .timers = .{},
             .completed_callbacks = .{},
+            .pending_fetch_count = std.atomic.Value(u32).init(0),
+            .completed_fetches = .{},
+            .fetch_mutex = .{},
         };
     }
 
     pub fn deinit(self: *EventLoop) void {
         self.timers.deinit(self.allocator);
         self.completed_callbacks.deinit(self.allocator);
+        // Drain completed fetches on shutdown
+        for (self.completed_fetches.items) |*cf| {
+            cf.deinit();
+        }
+        self.completed_fetches.deinit(self.allocator);
         self.loop.deinit();
     }
 
@@ -219,12 +247,34 @@ pub const EventLoop = struct {
         try self.loop.run(.once);
     }
 
-    /// Check if there's pending work
+    /// Check if there's pending work (timers or in-flight fetches)
     pub fn hasPendingWork(self: *EventLoop) bool {
+        if (self.pending_fetch_count.load(.acquire) > 0) return true;
         for (self.timers.items) |timer| {
             if (timer.active) return true;
         }
         return false;
+    }
+
+    /// Increment pending fetch count (call BEFORE spawning worker thread)
+    pub fn incrementPendingFetch(self: *EventLoop) void {
+        _ = self.pending_fetch_count.fetchAdd(1, .monotonic);
+    }
+
+    /// Add a completed fetch result (called from worker threads)
+    pub fn addCompletedFetch(self: *EventLoop, result: CompletedFetch) void {
+        _ = self.pending_fetch_count.fetchSub(1, .release);
+        self.fetch_mutex.lock();
+        defer self.fetch_mutex.unlock();
+        self.completed_fetches.append(self.allocator, result) catch {};
+    }
+
+    /// Drain all completed fetches (returns owned slice, caller must free)
+    pub fn drainCompletedFetches(self: *EventLoop) []CompletedFetch {
+        self.fetch_mutex.lock();
+        defer self.fetch_mutex.unlock();
+        const items = self.completed_fetches.toOwnedSlice(self.allocator) catch return &.{};
+        return items;
     }
 
     /// Get completed timer callbacks
