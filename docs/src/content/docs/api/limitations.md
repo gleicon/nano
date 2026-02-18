@@ -1,266 +1,37 @@
 ---
 title: Known Limitations
-description: Known limitations and planned fixes for NANO v1.2
+description: Known limitations and planned fixes for NANO
 sidebar:
   order: 99
 ---
 
-NANO v1.2 has several known limitations that were intentionally deferred during development. This page documents each limitation with workarounds and planned fixes.
-
-All limitations are tracked in the project backlog. Most will be addressed in v1.3.
+This page documents known limitations with workarounds and planned fixes. Limitations are tracked in the project backlog.
 
 ---
 
-## B-01: Stack Buffer Limits {#b-01-buffer-limits}
+## Fixed in v1.3
 
-**Severity:** High — silently truncates user data
+The following limitations from v1.2 have been resolved:
 
-**Discovered:** v1.2-04 (GA quality audit)
+### ~~B-01: Stack Buffer Limits~~ {#b-01-buffer-limits}
 
-### Affected APIs
+**Fixed in v1.3-01.** All APIs now use a stack+heap fallback pattern: small data uses fast stack buffers, large data automatically heap-allocates.
 
-Multiple APIs use stack-allocated buffers with fixed size limits:
+| API | Old Limit | v1.3 Behavior |
+|-----|-----------|---------------|
+| Blob constructor | 64KB | Heap-allocated, no limit |
+| Blob.text() / arrayBuffer() | 64KB | Heap-allocated, no limit |
+| fetch() request body | 64KB | Heap fallback above 64KB |
+| atob() / btoa() | 8KB / 16KB | Heap fallback above threshold |
+| console.log() | 4KB | Heap fallback above 4KB |
 
-| API | Buffer | Limit | Impact |
-|-----|--------|-------|--------|
-| Blob constructor | `encoded_buf` | 64KB | Large blobs truncated |
-| Blob.text() | `data_buf` + `decoded_buf` | 64KB each | Large blob reads fail |
-| Blob.arrayBuffer() | same pattern | 64KB | Large blob reads fail |
-| fetch() request body | `body_buf` | 64KB | Large POST/PUT bodies truncated |
-| atob() | input + output buffers | 8KB | Large base64 decode fails |
-| btoa() | input + output buffers | 8KB | Large base64 encode fails |
-| console.log() | per-value buffer | 4KB | Large objects truncated |
+### ~~B-02: Synchronous fetch()~~ {#b-02-synchronous-fetch}
 
-### Examples
+**Fixed in v1.3-01.** `fetch()` now spawns a background worker thread for HTTP I/O. The event loop continues processing timers, other fetches, and Promise callbacks while the request is in flight. See [Event Loop](/api/event-loop) and [fetch](/api/fetch) for details.
 
-```javascript
-// May be truncated if body > 64KB
-const largeBody = "x".repeat(70000);
-await fetch("https://api.example.com", {
-  method: "POST",
-  body: largeBody // Silently truncated to 64KB
-});
+### ~~B-03: WritableStream Sync-Only Sinks~~ {#b-03-writable-async}
 
-// May be truncated if data > 8KB
-const largeData = "x".repeat(10000);
-const base64 = btoa(largeData); // Truncated to 8KB
-
-// May be truncated if object is large
-const largeObject = { data: "x".repeat(5000) };
-console.log("Object:", largeObject); // May be truncated
-```
-
-### Workarounds
-
-**For fetch:** Stream large bodies or chunk uploads:
-
-```javascript
-// Chunk large data
-const chunkSize = 32768; // 32KB
-for (let i = 0; i < largeData.length; i += chunkSize) {
-  const chunk = largeData.slice(i, i + chunkSize);
-  await fetch(url, {
-    method: "POST",
-    headers: { "Content-Range": `bytes ${i}-${i + chunk.length}` },
-    body: chunk
-  });
-}
-```
-
-**For atob/btoa:** Process in chunks:
-
-```javascript
-function encodeChunks(data, chunkSize = 4096) {
-  const chunks = [];
-  for (let i = 0; i < data.length; i += chunkSize) {
-    chunks.push(btoa(data.slice(i, i + chunkSize)));
-  }
-  return chunks.join("");
-}
-```
-
-**For console.log:** Log specific fields:
-
-```javascript
-// Instead of logging entire large object
-console.log("User:", user); // May be truncated
-
-// Log specific fields
-console.log("User ID:", user.id);
-console.log("User name:", user.name);
-```
-
-### Planned Fix
-
-Replace stack buffers with heap allocation using `allocator.alloc()`. For hot-path APIs (Blob, fetch), consider pooled buffers or configurable max size.
-
-**Target:** v1.3 TBD
-
----
-
-## B-02: Synchronous fetch() Blocks Event Loop {#b-02-synchronous-fetch}
-
-**Severity:** High — single slow fetch stalls entire server
-
-**Discovered:** v1.0 (by design for MVP)
-
-### Current Behavior
-
-`fetch()` makes blocking TCP connections using `std.net.tcpConnectToHost`. Since NANO is single-threaded, during a fetch **no other requests can be accepted**.
-
-```javascript
-export default {
-  async fetch(request) {
-    // This blocks the entire server for 10+ seconds
-    const response = await fetch("https://very-slow-api.com/data");
-
-    // No other requests can be processed during the wait
-    return new Response(await response.text());
-  }
-};
-```
-
-### Impact
-
-- Single slow upstream API blocks all client requests
-- Cascading failures if upstream is down
-- Poor throughput under concurrent load
-
-### Workarounds
-
-**Keep fetch fast:** Only fetch from fast APIs (<1 second response time):
-
-```javascript
-const controller = new AbortController();
-setTimeout(() => controller.abort(), 1000);
-
-try {
-  const response = await fetch(url, {
-    signal: controller.signal
-  });
-  return new Response(await response.text());
-} catch (error) {
-  return Response.json({ error: "Timeout" }, { status: 504 });
-}
-```
-
-**Use reverse proxy:** Place NANO behind Nginx/Caddy with request queuing to buffer slow upstream responses.
-
-**Cache aggressively:** Avoid repeated fetches:
-
-```javascript
-const cache = new Map();
-
-export default {
-  async fetch(request) {
-    const cacheKey = "api-data";
-
-    if (cache.has(cacheKey)) {
-      return Response.json(cache.get(cacheKey));
-    }
-
-    const response = await fetch("https://api.example.com/data");
-    const data = await response.json();
-
-    cache.set(cacheKey, data);
-    setTimeout(() => cache.delete(cacheKey), 60000); // 1 min TTL
-
-    return Response.json(data);
-  }
-};
-```
-
-### Planned Fix
-
-Async HTTP client integrated with xev event loop. Options:
-
-1. Non-blocking HTTP client using xev sockets + completion callbacks
-2. Thread pool for fetch operations (simpler but adds concurrency)
-3. Connection pooling with keep-alive
-
-**Target:** v1.3 TBD
-
----
-
-## B-03: WritableStream Sync-Only Sinks {#b-03-writable-async}
-
-**Severity:** Medium — async write sinks don't work correctly
-
-**Discovered:** v1.2-02 (Streams Foundation)
-
-### Current Behavior
-
-The `write()` sink callback is called synchronously. If it returns a Promise, NANO doesn't await it — the write completes immediately and the next write begins.
-
-```javascript
-const stream = new WritableStream({
-  async write(chunk) {
-    await database.insert(chunk); // NOT awaited by NANO
-    // Next write starts immediately
-  }
-});
-
-const writer = stream.getWriter();
-await writer.write("chunk1");
-await writer.write("chunk2");
-// Both writes may execute in parallel, corrupting data
-```
-
-### Impact
-
-- Database writes may overlap and corrupt data
-- File writes may interleave incorrectly
-- Any async sink operation is unreliable
-
-### Workarounds
-
-**Use synchronous sinks:** Only perform sync operations in write():
-
-```javascript
-const buffer = [];
-
-const stream = new WritableStream({
-  write(chunk) {
-    buffer.push(chunk); // Sync operation only
-  },
-  close() {
-    // Process buffer after stream closes
-    processBuffer(buffer);
-  }
-});
-```
-
-**Implement manual queue:** Queue writes yourself:
-
-```javascript
-const queue = [];
-let processing = false;
-
-async function processQueue() {
-  if (processing) return;
-  processing = true;
-
-  while (queue.length > 0) {
-    const chunk = queue.shift();
-    await database.insert(chunk); // Now properly awaited
-  }
-
-  processing = false;
-}
-
-const stream = new WritableStream({
-  write(chunk) {
-    queue.push(chunk);
-    processQueue(); // Don't await
-  }
-});
-```
-
-### Planned Fix
-
-Promise-aware write queue in `src/api/writable_stream.zig:577`. After calling `write_fn.call()`, check if result is a Promise. If so, attach `.then()` callback that processes next queued write.
-
-**Target:** v1.3 TBD
+**Fixed in v1.3-01.** WritableStream's `write()` sink can now return a Promise. NANO detects the Promise and defers the next write until the sink resolves, providing correct sequential ordering and backpressure. See [Event Loop](/api/event-loop) and [Streams](/api/streams) for details.
 
 ---
 
@@ -595,16 +366,16 @@ Add `setAccessorSetter()` for mutable properties (pathname, search, hash, etc.) 
 
 ## Summary Table
 
-| ID | Summary | Severity | Workaround | Target |
-|----|---------|----------|------------|--------|
-| B-01 | Buffer limits | High | Chunking | v1.3 |
-| B-02 | Sync fetch | High | Timeouts + cache | v1.3 |
-| B-03 | Async WritableStream | Medium | Sync sinks only | v1.3 |
-| B-04 | Limited crypto | Medium | External service | v1.3 |
-| B-05 | tee() data loss | Medium | Read + recreate | v1.3 |
-| B-06 | Missing APIs | Low-Medium | Polyfills | v1.3 |
-| B-07 | Single-threaded | Low | Multi-process | v1.4+ |
-| B-08 | URL read-only | Low | Rebuild URLs | v1.3 |
+| ID | Summary | Severity | Status | Target |
+|----|---------|----------|--------|--------|
+| ~~B-01~~ | ~~Buffer limits~~ | ~~High~~ | **Fixed v1.3** | - |
+| ~~B-02~~ | ~~Sync fetch~~ | ~~High~~ | **Fixed v1.3** | - |
+| ~~B-03~~ | ~~Async WritableStream~~ | ~~Medium~~ | **Fixed v1.3** | - |
+| B-04 | Limited crypto | Medium | Open | v1.3 |
+| B-05 | tee() data loss | Medium | Open | v1.3 |
+| B-06 | Missing APIs | Low-Medium | Open | v1.3 |
+| B-07 | Single-threaded | Low | Open | v1.4+ |
+| B-08 | URL read-only | Low | Open | v1.3 |
 
 ---
 

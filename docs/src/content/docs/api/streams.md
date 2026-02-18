@@ -158,8 +158,8 @@ const stream = new WritableStream({
 });
 ```
 
-:::caution[Synchronous Sinks Only]
-WritableStream sinks must be synchronous. Returning a Promise from `write()` won't be awaited (B-03). See [Limitations](/api/limitations#b-03-writable-async).
+:::tip[Async Sinks Supported (v1.3)]
+Since v1.3, WritableStream sinks can return a Promise from `write()`. NANO detects the Promise and defers the next write until the sink promise resolves, providing correct backpressure handling. See [Event Loop](/api/event-loop) for details.
 :::
 
 ### Properties
@@ -488,28 +488,57 @@ export default {
 };
 ```
 
-## Known Limitations
+### Async WritableStream Sink
 
-### WritableStream Sync-Only Sinks (B-03)
+Since v1.3, `write()` sinks can return a Promise. NANO will wait for it to resolve before processing the next queued write:
 
-The `write()` sink callback must be synchronous. Returning a Promise won't be awaited.
+```javascript
+export default {
+  async fetch(request) {
+    const chunks = [];
 
-**Current behavior:**
+    const stream = new WritableStream({
+      write(chunk) {
+        // Return a Promise — NANO waits for it before next write
+        return new Promise(resolve => {
+          setTimeout(() => {
+            chunks.push(chunk);
+            resolve();
+          }, 10);
+        });
+      }
+    });
+
+    const writer = stream.getWriter();
+    await writer.write('a');
+    await writer.write('b');
+    await writer.write('c');
+    await writer.close();
+
+    // chunks === ['a', 'b', 'c'] — correct sequential order
+    return Response.json({ chunks });
+  }
+};
+```
+
+If the sink Promise rejects, the write Promise also rejects and the stream transitions to an errored state:
 
 ```javascript
 const stream = new WritableStream({
-  async write(chunk) {
-    await someAsyncOperation(chunk); // NOT awaited
-    // Next write starts immediately
+  write(chunk) {
+    throw new Error("sink error: " + chunk);
   }
 });
+
+const writer = stream.getWriter();
+try {
+  await writer.write('bad'); // Rejects with "sink error: bad"
+} catch (e) {
+  console.log(e); // Error: sink error: bad
+}
 ```
 
-**Workaround:** Use synchronous operations in sink or implement your own queueing.
-
-**Planned fix:** Promise-aware write queue in v1.3.
-
-See [Limitations](/api/limitations#b-03-writable-async) for details.
+## Known Limitations
 
 ### ReadableStream.tee() Data Loss (B-05)
 
@@ -523,6 +552,7 @@ See [Limitations](/api/limitations#b-05-tee-data-loss) for details.
 
 ## Related APIs
 
+- [Event Loop](/api/event-loop) - How async WritableStream sinks integrate with the event loop
 - [Response](/api/response) - Response.body returns ReadableStream
 - [fetch](/api/fetch) - Response bodies are streams
 - [Blob](/api/blob) - Convert streams to/from blobs

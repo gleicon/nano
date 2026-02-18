@@ -10,8 +10,8 @@ sidebar:
 
 The `fetch()` API allows you to make outbound HTTP requests from your NANO application. It follows the standard Fetch API specification.
 
-:::caution[Synchronous Fetch Blocks Event Loop]
-NANO's `fetch()` currently blocks the event loop (see [B-02 limitation](/api/limitations#b-02-synchronous-fetch)). While a fetch is in progress, the server cannot accept other requests. This is acceptable for quick API calls but may cause issues for long-running requests.
+:::tip[Non-Blocking Fetch (v1.3)]
+Since v1.3, `fetch()` is fully non-blocking. Each call spawns a background worker thread for HTTP I/O while the event loop continues processing timers, other fetches, and Promise callbacks. Multiple concurrent `fetch()` calls resolve independently. See [Event Loop](/api/event-loop) for details.
 :::
 
 ## Basic Usage
@@ -100,8 +100,8 @@ const response = await fetch("https://api.example.com/log", {
 });
 ```
 
-:::note[Body Size Limit]
-Request body is limited to 64KB due to stack buffer allocation. See [B-01 limitation](/api/limitations#b-01-buffer-limits) for details.
+:::note[Large Body Support]
+Since v1.3, request bodies larger than 64KB are automatically heap-allocated. There is no practical size limit for `body` strings.
 :::
 
 ## Response Handling
@@ -363,32 +363,62 @@ export default {
 };
 ```
 
-## Known Limitations
+## Async Behavior
 
-### Synchronous Fetch (B-02)
+### Non-Blocking Execution
 
-`fetch()` currently blocks the event loop. While waiting for a response, NANO cannot process other requests. This is acceptable for quick API calls but problematic for long-running requests.
+`fetch()` runs on a background worker thread. While the HTTP request is in flight, the event loop continues to process:
+- `setTimeout` / `setInterval` callbacks
+- Other concurrent `fetch()` calls
+- Promise resolution chains
+- WritableStream async sinks
 
-**Impact:** Single slow fetch can stall the entire server.
+```javascript
+export default {
+  async fetch(request) {
+    let timerFired = false;
+    setTimeout(() => { timerFired = true; }, 10);
 
-**Workaround:** Keep fetch requests fast (<1 second). For production, place NANO behind a reverse proxy with request queuing.
+    // Timer fires while fetch is in progress
+    const resp = await fetch("https://api.example.com/slow");
+    console.log(timerFired); // true
+    return new Response(await resp.text());
+  }
+};
+```
 
-**Planned fix:** Async HTTP client in v1.3.
+### Concurrent Fetches
 
-See [Limitations](/api/limitations#b-02-synchronous-fetch) for details.
+Multiple `fetch()` calls run in parallel when used with `Promise.all()`:
 
-### Request Body Limit (B-01)
+```javascript
+const [users, products] = await Promise.all([
+  fetch("https://api.example.com/users"),
+  fetch("https://api.example.com/products")
+]);
+// Both requests run concurrently on separate threads
+```
 
-Request body is limited to 64KB due to stack buffer allocation.
+### SSRF Protection
 
-**Workaround:** For large payloads, use external storage or chunked uploads.
+`fetch()` blocks requests to private and loopback addresses to prevent Server-Side Request Forgery:
 
-**Planned fix:** Heap allocation in v1.3.
+```javascript
+await fetch("http://127.0.0.1:8080/internal");    // Rejected: "BlockedHost"
+await fetch("http://169.254.169.254/metadata");    // Rejected: "BlockedHost"
+```
 
-See [Limitations](/api/limitations#b-01-buffer-limits) for details.
+Blocked ranges: `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.169.254`.
+
+### Sync Fallback
+
+In eval/REPL mode (`nano eval`, `nano repl`), `fetch()` runs synchronously since there is no event loop. Behavior is identical but blocking.
+
+See [Event Loop](/api/event-loop) for a detailed description of how async fetch integrates with the promise wait loop.
 
 ## Related APIs
 
+- [Event Loop](/api/event-loop) - How async fetch integrates with timers and promises
 - [Request](/api/request) - Incoming request object
 - [Response](/api/response) - Response object returned by fetch
 - [Headers](/api/headers) - Manipulating HTTP headers
